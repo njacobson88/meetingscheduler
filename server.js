@@ -36,16 +36,7 @@ try {
   console.error('Error loading tokens from file:', error);
 }
 
-// Function to save tokens to a file (for development only)
-// In production, use a secure database instead
-function saveTokensToFile(tokens) {
-  try {
-    fs.writeFileSync('./tokens.json', JSON.stringify(tokens));
-    console.log('Tokens saved to file');
-  } catch (error) {
-    console.error('Error saving tokens to file:', error);
-  }
-}
+
 
 // Admin-only auth route - keep this endpoint secured in production!
 app.get('/auth/admin', (req, res) => {
@@ -493,8 +484,6 @@ app.listen(serverPort, () => {
 });
 
 
-// Store tokens (in production, use environment variables)
-let adminTokens = null;
 
 // For production, try to get tokens from environment variables
 if (process.env.GOOGLE_REFRESH_TOKEN) {
@@ -520,11 +509,13 @@ if (process.env.GOOGLE_REFRESH_TOKEN) {
 // Function to save tokens (file for development, log for production)
 function saveTokensToFile(tokens) {
   try {
-    // In development, save to file
-    if (process.env.NODE_ENV !== 'production') {
-      fs.writeFileSync('./tokens.json', JSON.stringify(tokens));
-      console.log('Tokens saved to file');
-    } else {
+    // Serve static files in production
+	if (process.env.NODE_ENV === 'production') {
+	  app.use(express.static(path.join(__dirname, 'client/build')));
+	  app.get('*', (req, res) => {
+		res.sendFile(path.join(__dirname, 'client/build', 'index.html'));
+	  });
+	} else {
       // In production, log the refresh token to be saved as an environment variable
       console.log('IMPORTANT - Save this as GOOGLE_REFRESH_TOKEN:', tokens.refresh_token);
       console.log('IMPORTANT - Save this as GOOGLE_ACCESS_TOKEN:', tokens.access_token);
