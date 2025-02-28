@@ -14,18 +14,6 @@ const TIMEZONE = 'America/New_York'; // Default timezone
 app.use(cors());
 app.use(express.json());
 
-
-// Serve static files in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'client/build')));
-
-  // THIS IS THE KEY FIX: Catch-all route for client-side routing
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'client/build', 'index.html'));
-  });
-}
-
-
 // OAuth2 setup for admin (calendar owner)
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
@@ -36,18 +24,44 @@ const oauth2Client = new google.auth.OAuth2(
 // Store tokens (in production, use a secure database)
 let adminTokens = null;
 
-// Try to load tokens from a file if they exist (for development only)
-// In production, use a secure database instead
-try {
-  if (fs.existsSync('./tokens.json')) {
-    const tokensData = fs.readFileSync('./tokens.json', 'utf8');
-    adminTokens = JSON.parse(tokensData);
-    console.log('Loaded tokens from file');
+// For production, try to get tokens from environment variables
+if (process.env.GOOGLE_REFRESH_TOKEN) {
+  adminTokens = {
+    refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
+    access_token: process.env.GOOGLE_ACCESS_TOKEN || "",
+    expiry_date: parseInt(process.env.TOKEN_EXPIRY_DATE || "0")
+  };
+  console.log('Loaded tokens from environment variables');
+} else {
+  // For development, try to load tokens from a file
+  try {
+    if (fs.existsSync('./tokens.json')) {
+      const tokensData = fs.readFileSync('./tokens.json', 'utf8');
+      adminTokens = JSON.parse(tokensData);
+      console.log('Loaded tokens from file');
+    }
+  } catch (error) {
+    console.error('Error loading tokens from file:', error);
   }
-} catch (error) {
-  console.error('Error loading tokens from file:', error);
 }
 
+// Function to save tokens (file for development, log for production)
+function saveTokensToFile(tokens) {
+  try {
+    // Serve static files in production
+    if (process.env.NODE_ENV !== 'production') { //changed here
+      fs.writeFileSync('./tokens.json', JSON.stringify(tokens));
+      console.log('Tokens saved to file');
+    } else {
+      // In production, log the refresh token to be saved as an environment variable
+      console.log('IMPORTANT - Save this as GOOGLE_REFRESH_TOKEN:', tokens.refresh_token);
+      console.log('IMPORTANT - Save this as GOOGLE_ACCESS_TOKEN:', tokens.access_token);
+      console.log('IMPORTANT - Save this as TOKEN_EXPIRY_DATE:', tokens.expiry_date);
+    }
+  } catch (error) {
+    console.error('Error saving tokens:', error);
+  }
+}
 
 // Admin-only auth route - keep this endpoint secured in production!
 app.get('/auth/admin', (req, res) => {
@@ -138,6 +152,20 @@ async function findWorkCalendar() {
     return 'primary'; // Default to primary if error
   }
 }
+
+// Add a health check endpoint to verify the server is running
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', message: 'Server is running' });
+});
+
+// Check authentication status
+app.get('/api/check-admin-auth', (req, res) => {
+  if (adminTokens) {
+    res.status(200).json({ authenticated: true });
+  } else {
+    res.status(200).json({ authenticated: false });
+  }
+});
 
 // Get availability for an entire month
 app.get('/api/month-availability', async (req, res) => {
@@ -378,8 +406,6 @@ This meeting was booked via Dr. Jacobson's Meeting Scheduler App.
 
     console.log(`Successfully booked appointment: ${response.data.htmlLink}`);
 
-    // Removed the patch update that was causing double notifications
-
     res.json(response.data);
   } catch (error) {
     console.error('Error booking appointment:', error);
@@ -470,59 +496,23 @@ function calculateAdjacentSlots(events, startOfDay, endOfDay) {
   return availableSlots;
 }
 
-// Check authentication status
-app.get('/api/check-admin-auth', (req, res) => {
-  if (adminTokens) {
-    res.status(200).json({ authenticated: true });
-  } else {
-    res.status(200).json({ authenticated: false });
-  }
-});
-
-
-
-// For production, try to get tokens from environment variables
-if (process.env.GOOGLE_REFRESH_TOKEN) {
-  adminTokens = {
-    refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
-    access_token: process.env.GOOGLE_ACCESS_TOKEN || "",
-    expiry_date: parseInt(process.env.TOKEN_EXPIRY_DATE || "0")
-  };
-  console.log('Loaded tokens from environment variables');
-} else {
-  // For development, try to load tokens from a file
-  try {
-    if (fs.existsSync('./tokens.json')) {
-      const tokensData = fs.readFileSync('./tokens.json', 'utf8');
-      adminTokens = JSON.parse(tokensData);
-      console.log('Loaded tokens from file');
-    }
-  } catch (error) {
-    console.error('Error loading tokens from file:', error);
-  }
+// IMPORTANT: Serve static files AFTER defining all API routes
+// Serve static files in production
+if (process.env.NODE_ENV === 'production') {
+  // Serve the static files from the React app
+  app.use(express.static(path.join(__dirname, 'client/build')));
+  
+  // THIS IS THE KEY FIX: Catch-all route for client-side routing
+  // This must be the LAST route defined
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'client/build', 'index.html'));
+  });
 }
-
-// Function to save tokens (file for development, log for production)
-function saveTokensToFile(tokens) {
-  try {
-    // Serve static files in production
-	if (process.env.NODE_ENV !== 'production') { //changed here
-        fs.writeFileSync('./tokens.json', JSON.stringify(tokens));
-    } else {
-      // In production, log the refresh token to be saved as an environment variable
-      console.log('IMPORTANT - Save this as GOOGLE_REFRESH_TOKEN:', tokens.refresh_token);
-      console.log('IMPORTANT - Save this as GOOGLE_ACCESS_TOKEN:', tokens.access_token);
-      console.log('IMPORTANT - Save this as TOKEN_EXPIRY_DATE:', tokens.expiry_date);
-    }
-  } catch (error) {
-    console.error('Error saving tokens:', error);
-  }
-}
-
 
 const serverPort = PORT;
 app.listen(serverPort, () => {
   console.log(`Server running on port ${serverPort}`);
   console.log(`Admin authentication status: ${adminTokens ? 'Authenticated' : 'Not authenticated'}`);
   console.log(`To authenticate as admin, visit: http://localhost:${serverPort}/auth/admin`);
+  console.log(`NODE_ENV: ${process.env.NODE_ENV}`);
 });
