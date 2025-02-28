@@ -11,6 +11,49 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const TIMEZONE = 'America/New_York'; // Default timezone
 
+// Debug file system
+console.log("=== DEBUGGING FILE SYSTEM ===");
+console.log("Current working directory:", process.cwd());
+console.log("__dirname:", __dirname);
+console.log("Directory structure:");
+
+// Helper function to list directories recursively (with depth limit)
+function listDir(dir, depth = 0, maxDepth = 2) {
+  if (depth > maxDepth) return;
+  try {
+    const items = fs.readdirSync(dir);
+    console.log("  ".repeat(depth) + dir + ":");
+    for (const item of items) {
+      const itemPath = path.join(dir, item);
+      try {
+        const stats = fs.statSync(itemPath);
+        if (stats.isDirectory()) {
+          listDir(itemPath, depth + 1, maxDepth);
+        } else {
+          console.log("  ".repeat(depth + 1) + item);
+        }
+      } catch (err) {
+        console.log("  ".repeat(depth + 1) + item + " (Error: " + err.message + ")");
+      }
+    }
+  } catch (err) {
+    console.log("  ".repeat(depth) + dir + " (Error: " + err.message + ")");
+  }
+}
+
+// List the root directory structure
+listDir(__dirname);
+
+// Check for client build directory specifically
+const clientBuildPath = path.join(__dirname, 'client/build');
+console.log("Client build path exists:", fs.existsSync(clientBuildPath));
+
+if (fs.existsSync(clientBuildPath)) {
+  console.log("Client build contents:", fs.readdirSync(clientBuildPath));
+}
+
+console.log("=== END DEBUGGING ===");
+
 app.use(cors());
 app.use(express.json());
 
@@ -62,6 +105,48 @@ function saveTokensToFile(tokens) {
     console.error('Error saving tokens:', error);
   }
 }
+
+// If client/build doesn't exist or index.html is not found, serve a simple HTML page
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'production' && req.method === 'GET' && !req.path.startsWith('/api/') && !req.path.startsWith('/auth/')) {
+    const indexPath = path.join(__dirname, 'client/build/index.html');
+    
+    if (fs.existsSync(indexPath)) {
+      return next(); // Continue to the next middleware if the file exists
+    }
+    
+    // File doesn't exist, create a simple HTML page
+    console.log("Index file not found, serving fallback HTML for path:", req.path);
+    const fallbackHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Meeting Scheduler</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: Arial, sans-serif; margin: 0; padding: 20px; text-align: center; }
+          h1 { color: #333; }
+          .container { max-width: 800px; margin: 0 auto; }
+          .btn { display: inline-block; padding: 10px 20px; background-color: #4CAF50; color: white; 
+                 text-decoration: none; border-radius: 4px; margin-top: 20px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>Meeting Scheduler</h1>
+          <p>The application is running, but the client build files were not found.</p>
+          <p>Please complete the admin setup to use the scheduler:</p>
+          <a href="/auth/admin" class="btn">Admin Setup</a>
+        </div>
+      </body>
+      </html>
+    `;
+    
+    return res.send(fallbackHTML);
+  }
+  next();
+});
 
 // Admin-only auth route - keep this endpoint secured in production!
 app.get('/auth/admin', (req, res) => {
@@ -496,17 +581,46 @@ function calculateAdjacentSlots(events, startOfDay, endOfDay) {
   return availableSlots;
 }
 
-// IMPORTANT: Serve static files AFTER defining all API routes
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
-  // Serve the static files from the React app
-  app.use(express.static(path.join(__dirname, 'client/build')));
+  console.log("Setting up static file serving for production");
+  // Try multiple possible locations for client/build
+  const possibleBuildPaths = [
+    path.join(__dirname, 'client/build'),
+    path.join(__dirname, '../client/build'),
+    path.join(__dirname, 'build'),
+    path.join(process.cwd(), 'client/build')
+  ];
   
-  // THIS IS THE KEY FIX: Catch-all route for client-side routing
-  // This must be the LAST route defined
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'client/build', 'index.html'));
-  });
+  let staticPath = null;
+  for (const buildPath of possibleBuildPaths) {
+    if (fs.existsSync(buildPath)) {
+      console.log(`Found static files at: ${buildPath}`);
+      staticPath = buildPath;
+      break;
+    } else {
+      console.log(`Static path not found: ${buildPath}`);
+    }
+  }
+  
+  if (staticPath) {
+    app.use(express.static(staticPath));
+    
+    // This must be the LAST route defined
+    app.get('*', (req, res) => {
+      if (req.path.startsWith('/api/') || req.path.startsWith('/auth/')) {
+        return next();
+      }
+      const indexPath = path.join(staticPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(404).send('Static files were found but index.html is missing');
+      }
+    });
+  } else {
+    console.log("No static file path found!");
+  }
 }
 
 const serverPort = PORT;
