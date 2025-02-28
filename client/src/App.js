@@ -6,6 +6,16 @@ import axios from 'axios';
 import './App.css';
 import moment from 'moment-timezone';
 
+// Function to get base URL for API calls - removes hardcoded localhost references
+const getBaseUrl = () => {
+  // In production, use relative URLs
+  if (process.env.NODE_ENV === 'production') {
+    return '';
+  }
+  // In development, use localhost
+  return 'http://localhost:3001';
+};
+
 function App() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [availableSlots, setAvailableSlots] = useState([]);
@@ -18,6 +28,9 @@ function App() {
   const [bookingSuccess, setBookingSuccess] = useState(false);
   const [userTimezone, setUserTimezone] = useState(moment.tz.guess());
   const [timezones, setTimezones] = useState([]);
+  
+  // Get the base URL for API calls
+  const baseUrl = getBaseUrl();
   
   // Get list of common timezones
   useEffect(() => {
@@ -51,7 +64,7 @@ function App() {
   useEffect(() => {
     const checkAdminAuth = async () => {
       try {
-        const response = await axios.get('http://localhost:3001/api/check-admin-auth');
+        const response = await axios.get(`${baseUrl}/api/check-admin-auth`);
         if (response.data.authenticated) {
           setIsAppReady(true);
         } else {
@@ -64,14 +77,14 @@ function App() {
     };
     
     checkAdminAuth();
-  }, []);
+  }, [baseUrl]);
   
   // Fetch available slots when date changes
   useEffect(() => {
     if (isAppReady && selectedDate) {
       fetchAvailableSlots();
     }
-  }, [isAppReady, selectedDate, userTimezone]);
+  }, [isAppReady, selectedDate, userTimezone]); // eslint-disable-line react-hooks/exhaustive-deps
   
   const fetchAvailableSlots = async () => {
     setIsLoading(true);
@@ -80,7 +93,7 @@ function App() {
       const formattedDate = selectedDate.toISOString().split('T')[0];
       console.log(`Fetching slots for date: ${formattedDate}, timezone: ${userTimezone}`);
       
-      const response = await axios.get('http://localhost:3001/api/available-slots', {
+      const response = await axios.get(`${baseUrl}/api/available-slots`, {
         params: {
           date: formattedDate,
           timezone: userTimezone
@@ -119,7 +132,7 @@ function App() {
     
     setIsLoading(true);
     try {
-      await axios.post('http://localhost:3001/api/book', {
+      await axios.post(`${baseUrl}/api/book`, {
         startTime: selectedSlot.start,
         endTime: selectedSlot.end,
         name,
@@ -151,8 +164,8 @@ function App() {
         <h1>Calendar Setup Required</h1>
         <p>The calendar owner needs to complete initial setup.</p>
         <p>Please ask the administrator to visit:</p>
-        <a href="http://localhost:3001/auth/admin" className="admin-link">
-          http://localhost:3001/auth/admin
+        <a href={`${baseUrl}/auth/admin`} className="admin-link">
+          {window.location.origin}/auth/admin
         </a>
         <p>After completing setup, refresh this page.</p>
       </div>
@@ -171,7 +184,7 @@ function App() {
   return (
     <div className="container">
       <h1>Book a Meeting with Dr. Jacobson</h1>
-      <p className="subtitle">Please select a time.</p>
+      <p className="subtitle">Please select a time</p>
       
       {bookingSuccess && (
         <div className="success-message">
