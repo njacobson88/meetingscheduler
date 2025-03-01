@@ -751,7 +751,7 @@ app.get('/admin-availability', (req, res) => {
       max-width: 1000px;
       margin: 0 auto;
     }
-    h1 {
+    h1, h2 {
       color: #2c3e50;
       margin-bottom: 20px;
     }
@@ -782,8 +782,17 @@ app.get('/admin-availability', (req, res) => {
     button:hover {
       background-color: #2980b9;
     }
-    #results {
+    .results-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
       margin-top: 20px;
+    }
+    .results-section {
+      flex: 1;
+      min-width: 300px;
+    }
+    .results {
       white-space: pre-wrap;
       font-family: monospace;
       background-color: #f5f5f5;
@@ -791,10 +800,12 @@ app.get('/admin-availability', (req, res) => {
       border: 1px solid #ddd;
       border-radius: 4px;
       min-height: 200px;
+      margin-bottom: 10px;
     }
     .copy-btn {
-      margin-top: 10px;
       background-color: #2ecc71;
+      display: block;
+      width: 100%;
     }
     .copy-btn:hover {
       background-color: #27ae60;
@@ -837,15 +848,28 @@ app.get('/admin-availability', (req, res) => {
       <p>Loading availability data...</p>
     </div>
     
-    <div id="results"></div>
-    <button id="copyBtn" class="copy-btn">Copy to Clipboard</button>
+    <div class="results-container">
+      <div class="results-section">
+        <h2>Adjacent Slots</h2>
+        <div id="adjacentResults" class="results"></div>
+        <button id="copyAdjacentBtn" class="copy-btn">Copy Adjacent Slots</button>
+      </div>
+      
+      <div class="results-section">
+        <h2>All Available Slots</h2>
+        <div id="allResults" class="results"></div>
+        <button id="copyAllBtn" class="copy-btn">Copy All Available Slots</button>
+      </div>
+    </div>
   </div>
 
   <script>
     document.addEventListener('DOMContentLoaded', function() {
       const fetchBtn = document.getElementById('fetchBtn');
-      const copyBtn = document.getElementById('copyBtn');
-      const resultsDiv = document.getElementById('results');
+      const copyAdjacentBtn = document.getElementById('copyAdjacentBtn');
+      const copyAllBtn = document.getElementById('copyAllBtn');
+      const adjacentResultsDiv = document.getElementById('adjacentResults');
+      const allResultsDiv = document.getElementById('allResults');
       const loadingDiv = document.getElementById('loading');
       
       // Set default dates (today and 7 days from now)
@@ -857,7 +881,8 @@ app.get('/admin-availability', (req, res) => {
       document.getElementById('endDate').valueAsDate = nextWeek;
       
       fetchBtn.addEventListener('click', fetchAvailability);
-      copyBtn.addEventListener('click', copyToClipboard);
+      copyAdjacentBtn.addEventListener('click', () => copyToClipboard('adjacent'));
+      copyAllBtn.addEventListener('click', () => copyToClipboard('all'));
       
       function fetchAvailability() {
         const startDate = document.getElementById('startDate').value;
@@ -868,7 +893,8 @@ app.get('/admin-availability', (req, res) => {
           return;
         }
         
-        resultsDiv.textContent = '';
+        adjacentResultsDiv.textContent = '';
+        allResultsDiv.textContent = '';
         loadingDiv.style.display = 'block';
         
         fetch('/api/date-range-availability?startDate=' + startDate + '&endDate=' + endDate)
@@ -885,20 +911,28 @@ app.get('/admin-availability', (req, res) => {
           .catch(error => {
             console.error('Error fetching availability:', error);
             loadingDiv.style.display = 'none';
-            resultsDiv.textContent = 'Error fetching availability. Please try again.';
+            adjacentResultsDiv.textContent = 'Error fetching availability. Please try again.';
+            allResultsDiv.textContent = 'Error fetching availability. Please try again.';
           });
       }
       
       function formatResults(data) {
-        let formattedText = 'AVAILABILITY SUMMARY\\n';
-        formattedText += '==================\\n';
-        formattedText += 'All times are shown in Eastern Time (ET)\\n\\n';
+        // Format adjacent slots
+        let adjacentText = 'AVAILABILITY\\n';
+        adjacentText += '============\\n';
+        adjacentText += 'All times are shown in Eastern Time (ET)\\n\\n';
+        
+        // Format all available slots
+        let allText = 'AVAILABILITY\\n';
+        allText += '============\\n';
+        allText += 'All times are shown in Eastern Time (ET)\\n\\n';
         
         // Check if any data exists
         const dates = Object.keys(data).sort();
         if (dates.length === 0) {
-          formattedText += 'No dates found in the selected range.';
-          resultsDiv.textContent = formattedText;
+          const noDataMsg = 'No dates found in the selected range.';
+          adjacentResultsDiv.textContent = noDataMsg;
+          allResultsDiv.textContent = noDataMsg;
           return;
         }
         
@@ -915,16 +949,20 @@ app.get('/admin-availability', (req, res) => {
           // Create underline that matches the date length
           const underline = '='.repeat(formattedDate.length);
           
-          formattedText += formattedDate + '\\n';
-          formattedText += underline + '\\n';
+          // Add date heading to both sections
+          adjacentText += formattedDate + '\\n';
+          adjacentText += underline + '\\n';
+          
+          allText += formattedDate + '\\n';
+          allText += underline + '\\n';
           
           if (dayData.isWeekend) {
-            formattedText += 'Weekend - No availability\\n\\n';
+            adjacentText += 'Weekend - No availability\\n\\n';
+            allText += 'Weekend - No availability\\n\\n';
           } else {
-            // Adjacent slots
-            formattedText += '* ADJACENT SLOTS (For regular meetings):\\n';
+            // Adjacent slots - no label mentioning "adjacent"
             if (dayData.adjacent.length === 0) {
-              formattedText += '  - None available\\n';
+              adjacentText += '- None available\\n';
             } else {
               dayData.adjacent.forEach(slot => {
                 const start = new Date(slot.start);
@@ -934,14 +972,13 @@ app.get('/admin-availability', (req, res) => {
                 const startTime = formatTimeInET(start);
                 const endTime = formatTimeInET(end);
                 
-                formattedText += '  - ' + startTime + ' - ' + endTime + '\\n';
+                adjacentText += '- ' + startTime + ' - ' + endTime + '\\n';
               });
             }
             
-            // All available slots
-            formattedText += '\\n* ALL AVAILABLE SLOTS (For priority meetings):\\n';
+            // All available slots - no label mentioning "all available"
             if (dayData.all.length === 0) {
-              formattedText += '  - None available\\n';
+              allText += '- None available\\n';
             } else {
               dayData.all.forEach(slot => {
                 const start = new Date(slot.start);
@@ -951,15 +988,17 @@ app.get('/admin-availability', (req, res) => {
                 const startTime = formatTimeInET(start);
                 const endTime = formatTimeInET(end);
                 
-                formattedText += '  - ' + startTime + ' - ' + endTime + '\\n';
+                allText += '- ' + startTime + ' - ' + endTime + '\\n';
               });
             }
           }
           
-          formattedText += '\\n';
+          adjacentText += '\\n';
+          allText += '\\n';
         });
         
-        resultsDiv.textContent = formattedText;
+        adjacentResultsDiv.textContent = adjacentText;
+        allResultsDiv.textContent = allText;
       }
       
       // Helper function to format time in Eastern Time
@@ -973,8 +1012,8 @@ app.get('/admin-availability', (req, res) => {
         });
       }
       
-      function copyToClipboard() {
-        const text = resultsDiv.textContent;
+      function copyToClipboard(type) {
+        const text = type === 'adjacent' ? adjacentResultsDiv.textContent : allResultsDiv.textContent;
         
         if (!text || text === '') {
           alert('No data to copy');
@@ -997,7 +1036,6 @@ app.get('/admin-availability', (req, res) => {
   `;
   res.send(adminHTML);
 });
-
 
 
 
