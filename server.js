@@ -161,7 +161,7 @@ app.get('/api/check-admin-auth', (req, res) => {
 });
 
 // ----------------------------------------------
-//  MONTH AVAILABILITY (9-5 EST only)
+//  MONTH AVAILABILITY (9-5 EST only) - FIXED DAY OFFSET
 // ----------------------------------------------
 app.get('/api/month-availability', async (req, res) => {
   const { year, month, timezone } = req.query;
@@ -218,9 +218,10 @@ app.get('/api/month-availability', async (req, res) => {
         .toISOString()
         .split('T')[0];
       
+      // FIXED: Subtract 1 from day to fix date offset
       // Filter events for this specific day - CHECK FROM 8 AM to catch early meetings
-      const queryStart = new Date(Date.UTC(yearNum, monthNum, day, 13, 0, 0)); // 8AM ET
-      const queryEnd = new Date(Date.UTC(yearNum, monthNum, day, 22, 0, 0));   // 5PM ET
+      const queryStart = new Date(Date.UTC(yearNum, monthNum, day - 1, 13, 0, 0)); // 8AM ET
+      const queryEnd = new Date(Date.UTC(yearNum, monthNum, day - 1, 22, 0, 0));   // 5PM ET
       
       const dayEvents = events.filter(event => {
         if (!event.start.dateTime || !event.end.dateTime) return false;
@@ -239,8 +240,8 @@ app.get('/api/month-availability', async (req, res) => {
       console.log(`Day ${dateStr}: Found ${dayEvents.length} events (8AM-5PM Eastern)`);
       
       // Calculate available slots for this day during business hours (9AM-5PM)
-      const slotsStart = new Date(Date.UTC(yearNum, monthNum, day, 14, 0, 0)); // 9AM ET
-      const slotsEnd = new Date(Date.UTC(yearNum, monthNum, day, 22, 0, 0));   // 5PM ET
+      const slotsStart = new Date(Date.UTC(yearNum, monthNum, day - 1, 14, 0, 0)); // 9AM ET
+      const slotsEnd = new Date(Date.UTC(yearNum, monthNum, day - 1, 22, 0, 0));   // 5PM ET
       
       const availableSlots = calculateAdjacentSlots(dayEvents, slotsStart, slotsEnd);
       availability[dateStr] = availableSlots.length > 0;
