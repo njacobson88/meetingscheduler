@@ -610,7 +610,6 @@ if (process.env.NODE_ENV === 'production') {
 //  SERVER PING (PREVENT SLEEP)
 // ----------------------------------------------
 const https = require('https');
-const cron = require('node-cron');
 
 // Self-ping function to keep the server awake
 function pingServer() {
@@ -635,7 +634,8 @@ function pingServer() {
 
 // Schedule the ping to run every 14 minutes (Render sleeps after 15 minutes of inactivity)
 if (process.env.NODE_ENV === 'production') {
-  cron.schedule('*/14 * * * *', pingServer);
+  // 14 minutes in milliseconds = 14 * 60 * 1000 = 840000
+  setInterval(pingServer, 840000);
   console.log('Scheduled self-ping every 14 minutes to prevent server sleep');
 }
 
