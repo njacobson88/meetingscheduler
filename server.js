@@ -176,7 +176,7 @@ app.get('/api/month-availability', async (req, res) => {
     await ensureValidTokens();
     const calendar = getCalendarClient();
 
-    // Create date range for the month
+    // Create date range for the month in Eastern Time (Issue #1 fix)
     const yearNum = parseInt(year, 10);
     const monthNum = parseInt(month, 10) - 1; // JS months are 0-indexed
     
@@ -184,9 +184,10 @@ app.get('/api/month-availability', async (req, res) => {
 
     const calendarId = await findWorkCalendar();
 
-    // Get all events for the month
-    const startOfMonth = new Date(Date.UTC(yearNum, monthNum, 1));
-    const endOfMonth = new Date(Date.UTC(yearNum, monthNum + 1, 0, 23, 59, 59));
+    // Build start and end of month in Eastern Time
+    const startOfMonth = new Date(`${yearNum}-${String(monthNum + 1).padStart(2, '0')}-01T00:00:00-05:00`);
+    const daysInMonth = new Date(yearNum, monthNum + 1, 0).getDate();
+    const endOfMonth = new Date(`${yearNum}-${String(monthNum + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}T23:59:59-05:00`);
     
     console.log(`Querying calendar from ${startOfMonth.toISOString()} to ${endOfMonth.toISOString()}`);
     
@@ -209,7 +210,6 @@ app.get('/api/month-availability', async (req, res) => {
     console.log(`Found ${events.length} total events for the month`);
 
     // For each day in the month, check if there's at least one available slot (9-5 Eastern)
-    const daysInMonth = new Date(yearNum, monthNum + 1, 0).getDate();
     const availability = {};
 
     for (let day = 1; day <= daysInMonth; day++) {
@@ -219,7 +219,6 @@ app.get('/api/month-availability', async (req, res) => {
       // Filter events for this specific date
       const dayEvents = events.filter(event => {
         if (!event.start.dateTime || !event.end.dateTime) return false;
-        
         // Extract the date part only (YYYY-MM-DD)
         const eventDateStr = event.start.dateTime.split('T')[0];
         return eventDateStr === dateStr;
@@ -227,17 +226,14 @@ app.get('/api/month-availability', async (req, res) => {
 
       console.log(`Day ${dateStr}: Found ${dayEvents.length} events`);
       
-      // Filter events to only include those during 9AM-5PM Eastern
+      // (Issue #2 fix) Adjust filter to include events touching business hours (e.g. 8-9 AM)
+      const dayBusinessStart = new Date(`${dateStr}T09:00:00-05:00`);
+      const dayBusinessEnd = new Date(`${dateStr}T17:00:00-05:00`);
       const businessHourEvents = dayEvents.filter(event => {
+        if (!event.start.dateTime || !event.end.dateTime) return false;
         const eventStart = new Date(event.start.dateTime);
         const eventEnd = new Date(event.end.dateTime);
-        
-        // Extract hours from Eastern Time
-        const startHour = new Date(event.start.dateTime).getHours();
-        const endHour = new Date(event.end.dateTime).getHours();
-        
-        // Only include events between 9-5
-        return (startHour >= 9 && startHour < 17) || (endHour > 9 && endHour <= 17);
+        return eventEnd >= dayBusinessStart && eventStart <= dayBusinessEnd;
       });
 
       console.log(`Day ${dateStr}: Found ${businessHourEvents.length} events during business hours`);
@@ -274,7 +270,8 @@ app.get('/api/available-slots', async (req, res) => {
     // Ensure we're using the exact date requested
     console.log(`Request for available slots on ${date} in ${userTimezone}`);
     
-    // Set up 9AM-5PM Eastern Time range for the requested date
+    // (Issue #2 fix) Set up day start to capture adjacent events before 9AM
+    const dayStart = new Date(`${date}T00:00:00-05:00`);
     const businessStart = new Date(`${date}T09:00:00-05:00`); // 9AM Eastern
     const businessEnd = new Date(`${date}T17:00:00-05:00`);   // 5PM Eastern
 
@@ -282,10 +279,10 @@ app.get('/api/available-slots', async (req, res) => {
 
     const calendarId = await findWorkCalendar();
 
-    // Query Google Calendar for events on this day
+    // Query Google Calendar for events on this day (starting at day start to capture early events)
     const response = await calendar.events.list({
       calendarId: calendarId,
-      timeMin: businessStart.toISOString(),
+      timeMin: dayStart.toISOString(),
       timeMax: businessEnd.toISOString(),
       singleEvents: true,
       orderBy: 'startTime',
@@ -299,7 +296,7 @@ app.get('/api/available-slots', async (req, res) => {
       (!event.transparency || event.transparency !== 'transparent')
     );
 
-    console.log(`Found ${events.length} events for ${date} within 9AM-5PM Eastern`);
+    console.log(`Found ${events.length} events for ${date} within business hours`);
     
     // Debug: Print each event with its time
     events.forEach(event => {
