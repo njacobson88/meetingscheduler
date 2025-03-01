@@ -218,6 +218,17 @@ app.get('/api/month-availability', async (req, res) => {
         .toISOString()
         .split('T')[0];
       
+      // Check if the day is a weekend (0 = Sunday, 6 = Saturday)
+      const currentDate = new Date(Date.UTC(yearNum, monthNum, day));
+      const dayOfWeek = currentDate.getDay();
+      
+      // Skip weekends - no availability on weekends
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
+        availability[dateStr] = false; // No availability on weekends
+        console.log(`Day ${dateStr} is a weekend (day ${dayOfWeek}). No availability.`);
+        continue; // Skip to next day
+      }
+      
       // Filter events for this specific day - CHECK FROM 8 AM to catch early meetings
       const queryStart = new Date(Date.UTC(yearNum, monthNum, day, 13, 0, 0)); // 8AM ET
       const queryEnd = new Date(Date.UTC(yearNum, monthNum, day, 22, 0, 0));   // 5PM ET
@@ -270,20 +281,68 @@ app.get('/api/available-slots', async (req, res) => {
     // Ensure we're using the exact date requested
     console.log(`Request for available slots on ${date} in ${userTimezone}`);
     
-	// Parse date components to avoid timezone issues
-	const [yearStr, monthStr, dayStr] = date.split('-');
-	const year = parseInt(yearStr, 10);
-	const month = parseInt(monthStr, 10) - 1; // JS months are 0-indexed
-	const day = parseInt(dayStr, 10);
-
-	// Create dates explicitly in UTC that correspond to Eastern times
-	// 8 AM ET = UTC-5 = 13:00 UTC
-	const queryStart = new Date(Date.UTC(year, month, day - 1, 13, 0, 0)); // 8AM ET 
-	const queryEnd = new Date(Date.UTC(year, month, day - 1, 22, 0, 0));   // 5PM ET
-
-	// For creating slots (9 AM - 5 PM Eastern)
-	const slotsStart = new Date(Date.UTC(year, month, day - 1, 14, 0, 0)); // 9AM ET
-	const slotsEnd = new Date(Date.UTC(year, month, day - 1, 22, 0, 0));   // 5PM ET
+    // Parse date components
+    const [yearStr, monthStr, dayStr] = date.split('-');
+    const year = parseInt(yearStr, 10);
+    const month = parseInt(monthStr, 10) - 1; // JS months are 0-indexed
+    const day = parseInt(dayStr, 10);
+    
+    // Create a Date object in Eastern Time for the selected date
+    // First create the date in the desired timezone (Eastern)
+    const selectedDate = new Date(`${date}T00:00:00`);
+    
+    // Check if the selected date is a weekend (0 = Sunday, 6 = Saturday)
+    const dayOfWeek = selectedDate.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      console.log(`Selected date ${date} is a weekend (day ${dayOfWeek}). No bookings allowed.`);
+      return res.json([]); // Return empty array for weekends
+    }
+    
+    // For Eastern Time (ET), create the proper time boundaries for the business day
+    // Use the specific date requested with the correct business hours in ET
+    
+    // Convert these times to UTC for API calls
+    // Option 1: Calculate using Date.UTC for the specific date with ET business hours in UTC
+    const etOffset = -5; // Eastern Time UTC offset (ignoring DST for simplicity)
+    
+    // 8AM ET = 13:00 UTC (using the correct date)
+    const queryStart = new Date(Date.UTC(
+      year, 
+      month, 
+      day,
+      13 + etOffset, // Adjust for ET offset
+      0, 
+      0
+    ));
+    
+    // 5PM ET = 22:00 UTC (using the correct date)
+    const queryEnd = new Date(Date.UTC(
+      year, 
+      month, 
+      day, 
+      22 + etOffset, // Adjust for ET offset
+      0, 
+      0
+    ));
+    
+    // For creating slots (9 AM - 5 PM Eastern)
+    const slotsStart = new Date(Date.UTC(
+      year, 
+      month, 
+      day, 
+      14 + etOffset, // 9AM ET adjusted for offset
+      0, 
+      0
+    ));
+    
+    const slotsEnd = new Date(Date.UTC(
+      year, 
+      month, 
+      day, 
+      22 + etOffset, // 5PM ET adjusted for offset
+      0, 
+      0
+    ));
 
     console.log(`Querying events from ${queryStart.toISOString()} to ${queryEnd.toISOString()}`);
     console.log(`Will create slots from ${slotsStart.toISOString()} to ${slotsEnd.toISOString()}`);
@@ -346,6 +405,12 @@ app.post('/api/book', async (req, res) => {
     // Parse the times as UTC dates
     const startDate = new Date(startTime);
     const endDate = new Date(endTime);
+    
+    // Check if the booking is on a weekend
+    const dayOfWeek = startDate.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      return res.status(400).send('Appointments cannot be booked on weekends');
+    }
 
     // Validate 9-5 Eastern Time constraint (using proper UTC hours for Eastern Time)
     // 9 AM ET = 14:00 UTC, 5 PM ET = 22:00 UTC
