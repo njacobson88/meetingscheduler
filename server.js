@@ -1,20 +1,17 @@
-/***************************************************
- * server.js
- ***************************************************/
+// server.js
 const express = require('express');
 const { google } = require('googleapis');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
 const fs = require('fs');
-const moment = require('moment-timezone');  // Added moment-timezone
 
 dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// For your default, use 'America/New_York'
-const TIMEZONE = 'America/New_York';
+// Always use Eastern Time as the canonical timezone for 9-5 constraint
+const BUSINESS_TIMEZONE = 'America/New_York';
 
 // Debug logs for the file system (optional)
 console.log("=== DEBUGGING FILE SYSTEM ===");
@@ -26,7 +23,7 @@ app.use(cors());
 app.use(express.json());
 
 // ----------------------------------------------
-//  OAUTH & TOKEN LOGIC
+//  OAUTH & TOKEN LOGIC (UNCHANGED)
 // ----------------------------------------------
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
@@ -164,7 +161,7 @@ app.get('/api/check-admin-auth', (req, res) => {
 });
 
 // ----------------------------------------------
-//  MONTH AVAILABILITY (9-5 EST only, adjacent logic)
+//  MONTH AVAILABILITY (9-5 EST only)
 // ----------------------------------------------
 app.get('/api/month-availability', async (req, res) => {
   const { year, month, timezone } = req.query;
@@ -172,33 +169,35 @@ app.get('/api/month-availability', async (req, res) => {
     return res.status(400).send('Year and month parameters are required');
   }
 
-  const userTimezone = timezone || TIMEZONE;
+  // User timezone for display, but we'll query based on 9-5 Eastern
+  const userTimezone = timezone || BUSINESS_TIMEZONE;
 
   try {
     await ensureValidTokens();
     const calendar = getCalendarClient();
 
+    // Create a UTC date object for the first day of the month
     const yearNum = parseInt(year, 10);
-    const monthNum = parseInt(month, 10); // 1-based from client?
-
-    // Build start/end of the month in the user’s timezone, 9–5 checks come later.
-    // We'll fetch all events for the entire month in that TZ, then filter.
-    const startOfMonth = moment.tz([yearNum, monthNum - 1, 1], userTimezone).startOf('day');
-    const endOfMonth = moment.tz([yearNum, monthNum - 1, 1], userTimezone)
-                          .endOf('month').hour(23).minute(59).second(59).millisecond(999);
-
-    console.log(`Finding availability for ${year}-${month} in TZ ${userTimezone}`);
+    const monthNum = parseInt(month, 10) - 1; // JS months are 0-indexed
+    
+    console.log(`Finding availability for ${year}-${month} in ${BUSINESS_TIMEZONE}`);
 
     const calendarId = await findWorkCalendar();
 
+    // Get all events for the month - we'll filter them by day
+    const firstDay = new Date(Date.UTC(yearNum, monthNum, 1));
+    // Last day of the month (day 0 of next month)
+    const lastDay = new Date(Date.UTC(yearNum, monthNum + 1, 0, 23, 59, 59));
+    
+    // Query Google Calendar for the entire month
     const response = await calendar.events.list({
-      calendarId,
-      timeMin: startOfMonth.toISOString(),
-      timeMax: endOfMonth.toISOString(),
+      calendarId: calendarId,
+      timeMin: firstDay.toISOString(),
+      timeMax: lastDay.toISOString(),
       singleEvents: true,
       orderBy: 'startTime',
       maxResults: 2500,
-      timeZone: userTimezone
+      timeZone: BUSINESS_TIMEZONE // Query in Eastern Time
     });
 
     const events = response.data.items.filter(event =>
@@ -206,31 +205,40 @@ app.get('/api/month-availability', async (req, res) => {
       (!event.transparency || event.transparency !== 'transparent')
     );
 
-    const daysInMonth = endOfMonth.date(); // number of days in the chosen month
+    // For each day in the month, check if there's at least one available slot (9-5 Eastern)
+    const daysInMonth = new Date(yearNum, monthNum + 1, 0).getDate();
     const availability = {};
 
-    // Check each day for adjacent slots
     for (let day = 1; day <= daysInMonth; day++) {
-      // Local day range from 9:00 -> 17:00
-      const dayStart = moment.tz([yearNum, monthNum - 1, day], userTimezone)
-                            .hour(9).minute(0).second(0).millisecond(0);
-      const dayEnd = moment.tz([yearNum, monthNum - 1, day], userTimezone)
-                          .hour(17).minute(0).second(0).millisecond(0);
-
-      // Filter events for this calendar day (that overlap 9–5 in some way)
-      const dayEvents = events.filter(ev => {
-        if (!ev.start.dateTime || !ev.end.dateTime) return false;
-
-        const evStart = moment.tz(ev.start.dateTime, userTimezone);
-        // Compare if they're on the same date (in this TZ)
-        return evStart.year() === dayStart.year() &&
-               evStart.month() === dayStart.month() &&
-               evStart.date() === dayStart.date();
+      // Format as YYYY-MM-DD for consistency
+      const dateStr = `${yearNum}-${String(monthNum + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      
+      // For each day, we need to create 9AM-5PM in Eastern Time
+      // We do this by creating a date string like "2023-02-15T09:00:00" and 
+      // telling Google Calendar to interpret it in Eastern
+      const dayStart = `${dateStr}T09:00:00`;
+      const dayEnd = `${dateStr}T17:00:00`;
+      
+      // Filter events that overlap with this specific day's 9AM-5PM Eastern window
+      const dayEvents = events.filter(event => {
+        if (!event.start.dateTime || !event.end.dateTime) {
+          return false; // Skip all-day events
+        }
+        
+        // Get the event date string in format YYYY-MM-DD
+        const eventDate = event.start.dateTime.split('T')[0];
+        return eventDate === dateStr;
       });
 
-      // Calculate 30-min adjacent slots for that day
-      const freeSlots = calculateAdjacentSlots(dayEvents, dayStart, dayEnd, userTimezone);
-      availability[dayStart.format('YYYY-MM-DD')] = (freeSlots.length > 0);
+      // Calculate available slots for this day 
+      const availableSlots = calculateAdjacentSlots(
+        dayEvents, 
+        new Date(`${dayStart}Z`), 
+        new Date(`${dayEnd}Z`),
+        BUSINESS_TIMEZONE
+      );
+      
+      availability[dateStr] = availableSlots.length > 0;
     }
 
     res.json(availability);
@@ -241,44 +249,41 @@ app.get('/api/month-availability', async (req, res) => {
 });
 
 // ----------------------------------------------
-//  DAY AVAILABILITY (9-5 local time only)
+//  DAY AVAILABILITY (9-5 EST only)
 // ----------------------------------------------
 app.get('/api/available-slots', async (req, res) => {
   const { date, timezone } = req.query;
   if (!date) {
-    return res.status(400).send('Date parameter is required (YYYY-MM-DD)');
+    return res.status(400).send('Date parameter is required');
   }
-  const userTimezone = timezone || TIMEZONE;
+  // User timezone for display, but we'll query based on 9-5 Eastern
+  const userTimezone = timezone || BUSINESS_TIMEZONE;
 
   try {
     await ensureValidTokens();
     const calendar = getCalendarClient();
 
-    // Parse the date in the user’s TZ. Then set 9am–5pm.
-    const [yearStr, monthStr, dayStr] = date.split('-');
-    const yearNum = parseInt(yearStr, 10);
-    const monthNum = parseInt(monthStr, 10);
-    const dayNum = parseInt(dayStr, 10);
-
-    const startOfDay = moment.tz([yearNum, monthNum - 1, dayNum], userTimezone)
-                            .hour(9).minute(0).second(0).millisecond(0);
-    const endOfDay = moment.tz([yearNum, monthNum - 1, dayNum], userTimezone)
-                          .hour(17).minute(0).second(0).millisecond(0);
-
-    console.log(`Finding available slots for ${date} in TZ ${userTimezone}:`);
-    console.log(`Local day range: ${startOfDay.format()} - ${endOfDay.format()}`);
+    // Use the YYYY-MM-DD from the query parameter
+    const dateStr = date; // Already in YYYY-MM-DD format
+    
+    // Create 9AM - 5PM range in Eastern Time for the requested date
+    const startTime = `${dateStr}T09:00:00`;
+    const endTime = `${dateStr}T17:00:00`;
+    
+    console.log(`Finding available slots for ${dateStr} between 9AM-5PM in ${BUSINESS_TIMEZONE}`);
+    console.log(`Time range: ${startTime} - ${endTime} ${BUSINESS_TIMEZONE}`);
 
     const calendarId = await findWorkCalendar();
 
-    // Retrieve events that fall (even partially) between 9am–5pm in that TZ
+    // Query Google Calendar from 9 AM to 5 PM Eastern
     const response = await calendar.events.list({
-      calendarId,
-      timeMin: startOfDay.toISOString(),
-      timeMax: endOfDay.toISOString(),
+      calendarId: calendarId,
+      timeMin: new Date(startTime).toISOString(),
+      timeMax: new Date(endTime).toISOString(),
       singleEvents: true,
       orderBy: 'startTime',
       maxResults: 100,
-      timeZone: userTimezone
+      timeZone: BUSINESS_TIMEZONE // Query in Eastern Time
     });
 
     const events = response.data.items.filter(event =>
@@ -286,9 +291,15 @@ app.get('/api/available-slots', async (req, res) => {
       (!event.transparency || event.transparency !== 'transparent')
     );
 
-    console.log(`Found ${events.length} events in the 9–5 range for that day.`);
-    const availableSlots = calculateAdjacentSlots(events, startOfDay, endOfDay, userTimezone);
-
+    console.log(`Found ${events.length} events for ${dateStr} (9AM-5PM Eastern)`);
+    
+    const availableSlots = calculateAdjacentSlots(
+      events, 
+      new Date(`${startTime}Z`), 
+      new Date(`${endTime}Z`),
+      BUSINESS_TIMEZONE
+    );
+    
     res.json(availableSlots);
   } catch (error) {
     console.error('Error fetching available slots:', error);
@@ -297,14 +308,14 @@ app.get('/api/available-slots', async (req, res) => {
 });
 
 // ----------------------------------------------
-//  BOOK APPOINTMENT
+//  BOOK APPOINTMENT (unchanged, except ensures Eastern Time)
 // ----------------------------------------------
 app.post('/api/book', async (req, res) => {
   const { startTime, endTime, name, email, timezone } = req.body;
   if (!startTime || !endTime || !name || !email) {
     return res.status(400).send('Missing required parameters');
   }
-  const userTimezone = timezone || TIMEZONE;
+  const userTimezone = timezone || BUSINESS_TIMEZONE;
   const yourEmail = "njacobson88@gmail.com";
 
   try {
@@ -313,16 +324,38 @@ app.post('/api/book', async (req, res) => {
 
     console.log(`Booking appointment for ${name} (${email}) from ${startTime} to ${endTime}, tz: ${userTimezone}`);
 
-    // Parse them as moments in the user’s TZ to ensure correctness.
-    const startDate = moment.tz(startTime, userTimezone);
-    const endDate = moment.tz(endTime, userTimezone);
+    // Parse the ISO date strings
+    const startDate = new Date(startTime);
+    const endDate = new Date(endTime);
 
-    console.log(`Parsed appointment times (local TZ): ${startDate.format()} -> ${endDate.format()}`);
+    console.log(`Parsed appointment times: ${startDate.toISOString()} -> ${endDate.toISOString()}`);
+    
+    // Validate that the time is within 9AM-5PM Eastern
+    const startHour = new Date(startTime).getUTCHours();
+    const endHour = new Date(endTime).getUTCHours();
+    
+    if (startHour < 14 || startHour >= 22 || endHour < 14 || endHour > 22) {
+      return res.status(400).send('Appointment must be between 9AM and 5PM Eastern Time');
+    }
 
     const zoomLink = "dartmouth.zoom.us/my/jacobsonlab";
-    const formattedDate = startDate.format('dddd, MMMM Do YYYY');
-    const formattedStartTime = startDate.format('h:mm A');
-    const formattedEndTime = endDate.format('h:mm A');
+    const formattedDate = startDate.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      timeZone: userTimezone
+    });
+    const formattedStartTime = startDate.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: userTimezone
+    });
+    const formattedEndTime = endDate.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: userTimezone
+    });
 
     const eventDescription = `
 Meeting with: ${name}
@@ -339,11 +372,11 @@ This meeting was booked via Dr. Jacobson's Meeting Scheduler App.
       description: eventDescription,
       start: {
         dateTime: startDate.toISOString(),
-        timeZone: userTimezone
+        timeZone: BUSINESS_TIMEZONE
       },
       end: {
         dateTime: endDate.toISOString(),
-        timeZone: userTimezone
+        timeZone: BUSINESS_TIMEZONE
       },
       attendees: [
         { email: email },
@@ -362,7 +395,7 @@ This meeting was booked via Dr. Jacobson's Meeting Scheduler App.
 
     const calendarId = await findWorkCalendar();
     const response = await calendar.events.insert({
-      calendarId,
+      calendarId: calendarId,
       resource: event,
       sendUpdates: 'all',
       supportsAttachments: false
@@ -378,23 +411,20 @@ This meeting was booked via Dr. Jacobson's Meeting Scheduler App.
 
 // ----------------------------------------------
 //  CALCULATE ADJACENT 30-MINUTE SLOTS
-//  Only from startOfDay to endOfDay, must be next
-//  to an event within 1 minute. Overlapping is excluded.
+//  Only from startOfDay to endOfDay
 // ----------------------------------------------
-function calculateAdjacentSlots(events, startMoment, endMoment, userTimezone) {
+function calculateAdjacentSlots(events, startOfDay, endOfDay, timezone = BUSINESS_TIMEZONE) {
   console.log("Events found:", events.map(e => ({
     summary: e.summary,
     start: e.start.dateTime || e.start.date,
     end: e.end.dateTime || e.end.date
   })));
 
-  // Convert moment boundaries to plain Date for iteration
-  const startOfDay = startMoment.toDate();
-  const endOfDay = endMoment.toDate();
-
-  // Build all 30-min slots [startOfDay, endOfDay]
+  // Build all 30-min slots from 9AM to 5PM Eastern
   const slots = [];
   let current = new Date(startOfDay);
+
+  console.log(`Building slots from ${current.toISOString()} to ${endOfDay.toISOString()}`);
 
   while (current < endOfDay) {
     const slotStart = new Date(current);
@@ -412,23 +442,26 @@ function calculateAdjacentSlots(events, startMoment, endMoment, userTimezone) {
     current.setMinutes(current.getMinutes() + 30);
   }
 
-  // If no events, strictly no adjacency => return empty
+  console.log(`Created ${slots.length} 30-minute slots from 9AM to 5PM Eastern`);
+
+  // No events means no adjacent slots
   if (events.length === 0) {
-    console.log("No events found for this day — returning [] because we only show adjacent times.");
+    console.log("No events found for this day");
     return [];
   }
 
   // Mark overlapping or adjacent
   for (const event of events) {
     if (!event.start.dateTime || !event.end.dateTime) continue;
-
+    
+    // Parse event start/end times
     const eventStart = new Date(event.start.dateTime);
     const eventEnd = new Date(event.end.dateTime);
 
-    console.log(`Processing event: "${event.summary}" from ${eventStart.toLocaleTimeString()} to ${eventEnd.toLocaleTimeString()}`);
+    console.log(`Processing event: ${event.summary} from ${eventStart.toISOString()} to ${eventEnd.toISOString()}`);
 
     for (const slot of slots) {
-      // Overlap check: any intersection means the slot is unavailable
+      // Overlap check
       if (
         (slot.start >= eventStart && slot.start < eventEnd) ||
         (slot.end > eventStart && slot.end <= eventEnd) ||
@@ -438,16 +471,17 @@ function calculateAdjacentSlots(events, startMoment, endMoment, userTimezone) {
       }
 
       // Adjacent check (within 1 minute)
-      const slotStartsRightAfterEventEnds = Math.abs(slot.start.getTime() - eventEnd.getTime()) < 60_000;
-      const slotEndsRightBeforeEventStarts = Math.abs(slot.end.getTime() - eventStart.getTime()) < 60_000;
+      const slotStartsExactlyAfterEventEnds = Math.abs(slot.start.getTime() - eventEnd.getTime()) < 60000;
+      const slotEndsExactlyBeforeEventStarts = Math.abs(slot.end.getTime() - eventStart.getTime()) < 60000;
 
-      if (slotStartsRightAfterEventEnds || slotEndsRightBeforeEventStarts) {
+      if (slotStartsExactlyAfterEventEnds || slotEndsExactlyBeforeEventStarts) {
         slot.isAdjacent = true;
+        console.log(`Found adjacent slot: ${slot.start.toISOString()} to ${slot.end.toISOString()}`);
       }
     }
   }
 
-  // Return only those that are NOT overlapping but ARE adjacent
+  // Return only those that are "not overlapping" and "adjacent"
   const availableSlots = slots
     .filter(slot => !slot.isOverlapping && slot.isAdjacent)
     .map(slot => ({
@@ -455,12 +489,12 @@ function calculateAdjacentSlots(events, startMoment, endMoment, userTimezone) {
       end: slot.end.toISOString()
     }));
 
-  console.log(`Found ${availableSlots.length} adjacent 30-min slots free.`);
+  console.log(`Found ${availableSlots.length} available adjacent slots`);
   return availableSlots;
 }
 
 // ----------------------------------------------
-//  SERVE FALLBACK HTML if client build missing
+//  FALLBACK HTML if client build is missing
 // ----------------------------------------------
 app.use((req, res, next) => {
   if (
@@ -527,9 +561,9 @@ if (process.env.NODE_ENV === 'production') {
   }
   if (staticPath) {
     app.use(express.static(staticPath));
-    app.get('*', (req, res) => {
+    app.get('*', (req, res, next) => {
       if (req.path.startsWith('/api/') || req.path.startsWith('/auth/')) {
-        return;
+        return next();
       }
       const indexPath = path.join(staticPath, 'index.html');
       if (fs.existsSync(indexPath)) {
@@ -549,6 +583,7 @@ if (process.env.NODE_ENV === 'production') {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Admin authentication status: ${adminTokens ? 'Authenticated' : 'Not authenticated'}`);
-  console.log(`To authenticate as admin, visit: http://localhost:${PORT}/auth/admin`);
+  console.log(`To authenticate as admin, visit: /auth/admin`);
   console.log(`NODE_ENV: ${process.env.NODE_ENV}`);
+  console.log(`Business hours: 9AM-5PM in ${BUSINESS_TIMEZONE}`);
 });
