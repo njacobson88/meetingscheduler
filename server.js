@@ -607,6 +607,40 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // ----------------------------------------------
+//  SERVER PING (PREVENT SLEEP)
+// ----------------------------------------------
+const https = require('https');
+const cron = require('node-cron');
+
+// Self-ping function to keep the server awake
+function pingServer() {
+  const serverUrl = process.env.SERVER_URL || `http://localhost:${PORT}`;
+  console.log(`Pinging server at: ${serverUrl}`);
+  
+  // Use built-in http/https modules to make the request
+  try {
+    const request = serverUrl.startsWith('https') ? https.get(serverUrl) : require('http').get(serverUrl);
+    
+    request.on('response', (response) => {
+      console.log(`Self-ping successful with status: ${response.statusCode}`);
+    });
+    
+    request.on('error', (error) => {
+      console.error('Self-ping failed:', error.message);
+    });
+  } catch (error) {
+    console.error('Error during self-ping:', error.message);
+  }
+}
+
+// Schedule the ping to run every 14 minutes (Render sleeps after 15 minutes of inactivity)
+if (process.env.NODE_ENV === 'production') {
+  cron.schedule('*/14 * * * *', pingServer);
+  console.log('Scheduled self-ping every 14 minutes to prevent server sleep');
+}
+
+
+// ----------------------------------------------
 //  START SERVER
 // ----------------------------------------------
 app.listen(PORT, () => {
