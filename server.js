@@ -335,7 +335,7 @@ app.post('/api/book', async (req, res) => {
     return res.status(400).send('Missing required parameters');
   }
   const userTimezone = timezone || BUSINESS_TIMEZONE;
-  const yourEmail = "njacobson88@gmail.com";
+  const yourEmail = "Nicholas.C.Jacobson@dartmouth.edu";
 
   try {
     await ensureValidTokens();
