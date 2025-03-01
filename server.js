@@ -733,267 +733,267 @@ function calculateAllSlots(events, startOfDay, endOfDay) {
 // ----------------------------------------------
 app.get('/admin-availability', (req, res) => {
   const adminHTML = `
-	<!DOCTYPE html>
-	<html>
-	<head>
-	  <title>Date Range Availability</title>
-	  <meta charset="utf-8">
-	  <meta name="viewport" content="width=device-width, initial-scale=1">
-	  <style>
-		body {
-		  font-family: Arial, sans-serif;
-		  line-height: 1.6;
-		  margin: 0;
-		  padding: 20px;
-		  color: #333;
-		}
-		.container {
-		  max-width: 1000px;
-		  margin: 0 auto;
-		}
-		h1 {
-		  color: #2c3e50;
-		  margin-bottom: 20px;
-		}
-		.form-group {
-		  margin-bottom: 15px;
-		}
-		label {
-		  display: block;
-		  margin-bottom: 5px;
-		  font-weight: bold;
-		}
-		input[type="date"] {
-		  padding: 8px;
-		  border: 1px solid #ddd;
-		  border-radius: 4px;
-		  width: 200px;
-		}
-		button {
-		  padding: 10px 15px;
-		  background-color: #3498db;
-		  color: white;
-		  border: none;
-		  border-radius: 4px;
-		  cursor: pointer;
-		  font-weight: bold;
-		  transition: background-color 0.3s;
-		}
-		button:hover {
-		  background-color: #2980b9;
-		}
-		#results {
-		  margin-top: 20px;
-		  white-space: pre-wrap;
-		  font-family: monospace;
-		  background-color: #f5f5f5;
-		  padding: 15px;
-		  border: 1px solid #ddd;
-		  border-radius: 4px;
-		  min-height: 200px;
-		}
-		.copy-btn {
-		  margin-top: 10px;
-		  background-color: #2ecc71;
-		}
-		.copy-btn:hover {
-		  background-color: #27ae60;
-		}
-		.loading {
-		  display: none;
-		  text-align: center;
-		  margin: 20px 0;
-		}
-		.spinner {
-		  border: 4px solid #f3f3f3;
-		  border-top: 4px solid #3498db;
-		  border-radius: 50%;
-		  width: 30px;
-		  height: 30px;
-		  animation: spin 2s linear infinite;
-		  margin: 0 auto;
-		}
-		@keyframes spin {
-		  0% { transform: rotate(0deg); }
-		  100% { transform: rotate(360deg); }
-		}
-	  </style>
-	</head>
-	<body>
-	  <div class="container">
-		<h1>Date Range Availability</h1>
-		<div class="form-group">
-		  <label for="startDate">Start Date:</label>
-		  <input type="date" id="startDate" required>
-		</div>
-		<div class="form-group">
-		  <label for="endDate">End Date:</label>
-		  <input type="date" id="endDate" required>
-		</div>
-		<button id="fetchBtn">Fetch Availability</button>
-		
-		<div id="loading" class="loading">
-		  <div class="spinner"></div>
-		  <p>Loading availability data...</p>
-		</div>
-		
-		<div id="results"></div>
-		<button id="copyBtn" class="copy-btn">Copy to Clipboard</button>
-	  </div>
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Date Range Availability</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      line-height: 1.6;
+      margin: 0;
+      padding: 20px;
+      color: #333;
+    }
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: #2c3e50;
+      margin-bottom: 20px;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    input[type="date"] {
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      width: 200px;
+    }
+    button {
+      padding: 10px 15px;
+      background-color: #3498db;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: background-color 0.3s;
+    }
+    button:hover {
+      background-color: #2980b9;
+    }
+    #results {
+      margin-top: 20px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      background-color: #f5f5f5;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      min-height: 200px;
+    }
+    .copy-btn {
+      margin-top: 10px;
+      background-color: #2ecc71;
+    }
+    .copy-btn:hover {
+      background-color: #27ae60;
+    }
+    .loading {
+      display: none;
+      text-align: center;
+      margin: 20px 0;
+    }
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3498db;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 2s linear infinite;
+      margin: 0 auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Date Range Availability</h1>
+    <div class="form-group">
+      <label for="startDate">Start Date:</label>
+      <input type="date" id="startDate" required>
+    </div>
+    <div class="form-group">
+      <label for="endDate">End Date:</label>
+      <input type="date" id="endDate" required>
+    </div>
+    <button id="fetchBtn">Fetch Availability</button>
+    
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      <p>Loading availability data...</p>
+    </div>
+    
+    <div id="results"></div>
+    <button id="copyBtn" class="copy-btn">Copy to Clipboard</button>
+  </div>
 
-	  <script>
-		document.addEventListener('DOMContentLoaded', function() {
-		  const fetchBtn = document.getElementById('fetchBtn');
-		  const copyBtn = document.getElementById('copyBtn');
-		  const resultsDiv = document.getElementById('results');
-		  const loadingDiv = document.getElementById('loading');
-		  
-		  // Set default dates (today and 7 days from now)
-		  const today = new Date();
-		  const nextWeek = new Date();
-		  nextWeek.setDate(today.getDate() + 7);
-		  
-		  document.getElementById('startDate').valueAsDate = today;
-		  document.getElementById('endDate').valueAsDate = nextWeek;
-		  
-		  fetchBtn.addEventListener('click', fetchAvailability);
-		  copyBtn.addEventListener('click', copyToClipboard);
-		  
-		  function fetchAvailability() {
-			const startDate = document.getElementById('startDate').value;
-			const endDate = document.getElementById('endDate').value;
-			
-			if (!startDate || !endDate) {
-			  alert('Please select both start and end dates');
-			  return;
-			}
-			
-			resultsDiv.textContent = '';
-			loadingDiv.style.display = 'block';
-			
-			fetch(`/api/date-range-availability?startDate=${startDate}&endDate=${endDate}`)
-			  .then(response => {
-				if (!response.ok) {
-				  throw new Error('Network response was not ok');
-				}
-				return response.json();
-			  })
-			  .then(data => {
-				loadingDiv.style.display = 'none';
-				formatResults(data);
-			  })
-			  .catch(error => {
-				console.error('Error fetching availability:', error);
-				loadingDiv.style.display = 'none';
-				resultsDiv.textContent = 'Error fetching availability. Please try again.';
-			  });
-		  }
-		  
-		  function formatResults(data) {
-			let formattedText = 'AVAILABILITY SUMMARY\n';
-			formattedText += '==================\n';
-			formattedText += 'All times are shown in Eastern Time (ET)\n\n';
-			
-			// Check if any data exists
-			const dates = Object.keys(data).sort();
-			if (dates.length === 0) {
-			  formattedText += 'No dates found in the selected range.';
-			  resultsDiv.textContent = formattedText;
-			  return;
-			}
-			
-			dates.forEach(date => {
-			  const dayData = data[date];
-			  const dateObj = new Date(date + 'T00:00:00');
-			  const formattedDate = dateObj.toLocaleDateString('en-US', {
-				weekday: 'long',
-				year: 'numeric',
-				month: 'long',
-				day: 'numeric'
-			  });
-			  
-			  // Create underline that matches the date length
-			  const underline = '='.repeat(formattedDate.length);
-			  
-			  formattedText += `${formattedDate}\n`;
-			  formattedText += `${underline}\n`;
-			  
-			  if (dayData.isWeekend) {
-				formattedText += 'Weekend - No availability\n\n';
-			  } else {
-				// Adjacent slots
-				formattedText += '* ADJACENT SLOTS (For regular meetings):\n';
-				if (dayData.adjacent.length === 0) {
-				  formattedText += '  - None available\n';
-				} else {
-				  dayData.adjacent.forEach(slot => {
-					const start = new Date(slot.start);
-					const end = new Date(slot.end);
-					
-					// Format times in Eastern Time
-					const startTime = formatTimeInET(start);
-					const endTime = formatTimeInET(end);
-					
-					formattedText += `  - ${startTime} - ${endTime}\n`;
-				  });
-				}
-				
-				// All available slots
-				formattedText += '\n* ALL AVAILABLE SLOTS (For priority meetings):\n';
-				if (dayData.all.length === 0) {
-				  formattedText += '  - None available\n';
-				} else {
-				  dayData.all.forEach(slot => {
-					const start = new Date(slot.start);
-					const end = new Date(slot.end);
-					
-					// Format times in Eastern Time
-					const startTime = formatTimeInET(start);
-					const endTime = formatTimeInET(end);
-					
-					formattedText += `  - ${startTime} - ${endTime}\n`;
-				  });
-				}
-			  }
-			  
-			  formattedText += '\n';
-			});
-			
-			resultsDiv.textContent = formattedText;
-		  }
-		  
-		  // Helper function to format time in Eastern Time
-		  function formatTimeInET(date) {
-			// New York time zone for Eastern Time
-			return date.toLocaleTimeString('en-US', {
-			  hour: '2-digit',
-			  minute: '2-digit',
-			  hour12: true,
-			  timeZone: 'America/New_York'
-			});
-		  }
-		  
-		  function copyToClipboard() {
-			const text = resultsDiv.textContent;
-			
-			if (!text || text === '') {
-			  alert('No data to copy');
-			  return;
-			}
-			
-			navigator.clipboard.writeText(text)
-			  .then(() => {
-				alert('Copied to clipboard!');
-			  })
-			  .catch(err => {
-				console.error('Failed to copy: ', err);
-				alert('Failed to copy to clipboard');
-			  });
-		  }
-		});
-	  </script>
-	</body>
-	</html>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const fetchBtn = document.getElementById('fetchBtn');
+      const copyBtn = document.getElementById('copyBtn');
+      const resultsDiv = document.getElementById('results');
+      const loadingDiv = document.getElementById('loading');
+      
+      // Set default dates (today and 7 days from now)
+      const today = new Date();
+      const nextWeek = new Date();
+      nextWeek.setDate(today.getDate() + 7);
+      
+      document.getElementById('startDate').valueAsDate = today;
+      document.getElementById('endDate').valueAsDate = nextWeek;
+      
+      fetchBtn.addEventListener('click', fetchAvailability);
+      copyBtn.addEventListener('click', copyToClipboard);
+      
+      function fetchAvailability() {
+        const startDate = document.getElementById('startDate').value;
+        const endDate = document.getElementById('endDate').value;
+        
+        if (!startDate || !endDate) {
+          alert('Please select both start and end dates');
+          return;
+        }
+        
+        resultsDiv.textContent = '';
+        loadingDiv.style.display = 'block';
+        
+        fetch('/api/date-range-availability?startDate=' + startDate + '&endDate=' + endDate)
+          .then(response => {
+            if (!response.ok) {
+              throw new Error('Network response was not ok');
+            }
+            return response.json();
+          })
+          .then(data => {
+            loadingDiv.style.display = 'none';
+            formatResults(data);
+          })
+          .catch(error => {
+            console.error('Error fetching availability:', error);
+            loadingDiv.style.display = 'none';
+            resultsDiv.textContent = 'Error fetching availability. Please try again.';
+          });
+      }
+      
+      function formatResults(data) {
+        let formattedText = 'AVAILABILITY SUMMARY\\n';
+        formattedText += '==================\\n';
+        formattedText += 'All times are shown in Eastern Time (ET)\\n\\n';
+        
+        // Check if any data exists
+        const dates = Object.keys(data).sort();
+        if (dates.length === 0) {
+          formattedText += 'No dates found in the selected range.';
+          resultsDiv.textContent = formattedText;
+          return;
+        }
+        
+        dates.forEach(date => {
+          const dayData = data[date];
+          const dateObj = new Date(date + 'T00:00:00');
+          const formattedDate = dateObj.toLocaleDateString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+          });
+          
+          // Create underline that matches the date length
+          const underline = '='.repeat(formattedDate.length);
+          
+          formattedText += formattedDate + '\\n';
+          formattedText += underline + '\\n';
+          
+          if (dayData.isWeekend) {
+            formattedText += 'Weekend - No availability\\n\\n';
+          } else {
+            // Adjacent slots
+            formattedText += '* ADJACENT SLOTS (For regular meetings):\\n';
+            if (dayData.adjacent.length === 0) {
+              formattedText += '  - None available\\n';
+            } else {
+              dayData.adjacent.forEach(slot => {
+                const start = new Date(slot.start);
+                const end = new Date(slot.end);
+                
+                // Format times in Eastern Time
+                const startTime = formatTimeInET(start);
+                const endTime = formatTimeInET(end);
+                
+                formattedText += '  - ' + startTime + ' - ' + endTime + '\\n';
+              });
+            }
+            
+            // All available slots
+            formattedText += '\\n* ALL AVAILABLE SLOTS (For priority meetings):\\n';
+            if (dayData.all.length === 0) {
+              formattedText += '  - None available\\n';
+            } else {
+              dayData.all.forEach(slot => {
+                const start = new Date(slot.start);
+                const end = new Date(slot.end);
+                
+                // Format times in Eastern Time
+                const startTime = formatTimeInET(start);
+                const endTime = formatTimeInET(end);
+                
+                formattedText += '  - ' + startTime + ' - ' + endTime + '\\n';
+              });
+            }
+          }
+          
+          formattedText += '\\n';
+        });
+        
+        resultsDiv.textContent = formattedText;
+      }
+      
+      // Helper function to format time in Eastern Time
+      function formatTimeInET(date) {
+        // New York time zone for Eastern Time
+        return date.toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+          timeZone: 'America/New_York'
+        });
+      }
+      
+      function copyToClipboard() {
+        const text = resultsDiv.textContent;
+        
+        if (!text || text === '') {
+          alert('No data to copy');
+          return;
+        }
+        
+        navigator.clipboard.writeText(text)
+          .then(() => {
+            alert('Copied to clipboard!');
+          })
+          .catch(err => {
+            console.error('Failed to copy: ', err);
+            alert('Failed to copy to clipboard');
+          });
+      }
+    });
+  </script>
+</body>
+</html>
   `;
   res.send(adminHTML);
 });
