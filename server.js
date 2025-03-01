@@ -267,6 +267,25 @@ app.get('/api/month-availability', async (req, res) => {
 // ----------------------------------------------
 //  DAY AVAILABILITY (9-5 EST only)
 // ----------------------------------------------
+// Helper function to check if a date is during Eastern Daylight Time (EDT)
+function isEasternTimeDST(dateStr) {
+  // Parse the date (using noon UTC to avoid any boundary issues)
+  const date = new Date(dateStr + 'T12:00:00Z');
+  const year = date.getUTCFullYear();
+  
+  // DST starts at 2:00 AM ET on the second Sunday of March
+  let marchSecondSunday = new Date(Date.UTC(year, 2, 1)); // March 1
+  marchSecondSunday.setUTCDate(marchSecondSunday.getUTCDate() + (7 - marchSecondSunday.getUTCDay()) % 7 + 7);
+  
+  // DST ends at 2:00 AM ET on the first Sunday of November
+  let novemberFirstSunday = new Date(Date.UTC(year, 10, 1)); // November 1
+  novemberFirstSunday.setUTCDate(novemberFirstSunday.getUTCDate() + (7 - novemberFirstSunday.getUTCDay()) % 7);
+  
+  // Check if the date falls within the DST period
+  return date >= marchSecondSunday && date < novemberFirstSunday;
+}
+
+// Updated /api/available-slots endpoint with DST handling
 app.get('/api/available-slots', async (req, res) => {
   const { date, timezone } = req.query;
   if (!date) {
@@ -295,15 +314,22 @@ app.get('/api/available-slots', async (req, res) => {
       return res.json([]); // Return empty array for weekends
     }
     
+    // Check if DST is in effect for the given date
+    const isDST = isEasternTimeDST(date);
+    // During EDT (DST), the offset is UTC-4, during EST it's UTC-5
+    const utcOffset = isDST ? 4 : 5; 
+    
     // Create dates explicitly in UTC that correspond to Eastern times
-    // 8 AM ET = UTC-5 = 13:00 UTC
-    const queryStart = new Date(Date.UTC(year, month, day, 13, 0, 0)); // 8AM ET 
-    const queryEnd = new Date(Date.UTC(year, month, day, 22, 0, 0));   // 5PM ET
+    // For EDT: 8 AM + 4 = 12 UTC, 9 AM + 4 = 13 UTC, 5 PM + 4 = 21 UTC
+    // For EST: 8 AM + 5 = 13 UTC, 9 AM + 5 = 14 UTC, 5 PM + 5 = 22 UTC
+    const queryStart = new Date(Date.UTC(year, month, day, 8 + utcOffset, 0, 0)); // 8AM ET 
+    const queryEnd = new Date(Date.UTC(year, month, day, 17 + utcOffset, 0, 0));   // 5PM ET
 
     // For creating slots (9 AM - 5 PM Eastern)
-    const slotsStart = new Date(Date.UTC(year, month, day, 14, 0, 0)); // 9AM ET
-    const slotsEnd = new Date(Date.UTC(year, month, day, 22, 0, 0));   // 5PM ET
+    const slotsStart = new Date(Date.UTC(year, month, day, 9 + utcOffset, 0, 0)); // 9AM ET
+    const slotsEnd = new Date(Date.UTC(year, month, day, 17 + utcOffset, 0, 0));   // 5PM ET
 
+    console.log(`DST in effect: ${isDST}, Using UTC offset: ${utcOffset}`);
     console.log(`Querying events from ${queryStart.toISOString()} to ${queryEnd.toISOString()}`);
     console.log(`Will create slots from ${slotsStart.toISOString()} to ${slotsEnd.toISOString()}`);
 
