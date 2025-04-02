@@ -285,7 +285,7 @@ function isEasternTimeDST(dateStr) {
   return date >= marchSecondSunday && date < novemberFirstSunday;
 }
 
-// Updated /api/available-slots endpoint with DST handling
+// Updated /api/available-slots endpoint with DST handling & wider query
 app.get('/api/available-slots', async (req, res) => {
   const { date, timezone } = req.query;
   if (!date) {
@@ -299,13 +299,13 @@ app.get('/api/available-slots', async (req, res) => {
 
     // Ensure we're using the exact date requested
     console.log(`Request for available slots on ${date} in ${userTimezone}`);
-    
+
     // Parse date components
     const [yearStr, monthStr, dayStr] = date.split('-');
     const year = parseInt(yearStr, 10);
     const month = parseInt(monthStr, 10) - 1; // JS months are 0-indexed
     const day = parseInt(dayStr, 10);
-    
+
     // Check if the selected date is a weekend (0 = Sunday, 6 = Saturday)
     const selectedDate = new Date(Date.UTC(year, month, day));
     const dayOfWeek = selectedDate.getUTCDay();
@@ -313,63 +313,101 @@ app.get('/api/available-slots', async (req, res) => {
       console.log(`Selected date ${date} is a weekend (day ${dayOfWeek}). No bookings allowed.`);
       return res.json([]); // Return empty array for weekends
     }
-    
+
     // Check if DST is in effect for the given date
     const isDST = isEasternTimeDST(date);
     // During EDT (DST), the offset is UTC-4, during EST it's UTC-5
-    const utcOffset = isDST ? 4 : 5; 
-    
-    // Create dates explicitly in UTC that correspond to Eastern times
-    // For EDT: 8 AM + 4 = 12 UTC, 9 AM + 4 = 13 UTC, 5 PM + 4 = 21 UTC
-    // For EST: 8 AM + 5 = 13 UTC, 9 AM + 5 = 14 UTC, 5 PM + 5 = 22 UTC
-    const queryStart = new Date(Date.UTC(year, month, day, 8 + utcOffset, 0, 0)); // 8AM ET 
-    const queryEnd = new Date(Date.UTC(year, month, day, 17 + utcOffset, 0, 0));   // 5PM ET
+    const utcOffset = isDST ? 4 : 5;
 
-    // For creating slots (9 AM - 5 PM Eastern)
+    // --- FIX for Issue 2: Widen Query Window ---
+    // Query the entire day in UTC, corresponding to midnight to midnight in Eastern Time.
+    const queryStart = new Date(Date.UTC(year, month, day, utcOffset, 0, 0)); // 00:00 ET
+    const queryEnd = new Date(Date.UTC(year, month, day + 1, utcOffset, 0, 0)); // 00:00 ET next day
+
+    // --- Business hours for creating slots (9 AM - 5 PM Eastern) ---
     const slotsStart = new Date(Date.UTC(year, month, day, 9 + utcOffset, 0, 0)); // 9AM ET
     const slotsEnd = new Date(Date.UTC(year, month, day, 17 + utcOffset, 0, 0));   // 5PM ET
 
     console.log(`DST in effect: ${isDST}, Using UTC offset: ${utcOffset}`);
-    console.log(`Querying events from ${queryStart.toISOString()} to ${queryEnd.toISOString()}`);
-    console.log(`Will create slots from ${slotsStart.toISOString()} to ${slotsEnd.toISOString()}`);
+    console.log(`Querying events for full day: ${queryStart.toISOString()} to ${queryEnd.toISOString()}`);
+    console.log(`Will create slots within business hours: ${slotsStart.toISOString()} to ${slotsEnd.toISOString()}`);
 
     const calendarId = await findWorkCalendar();
 
-    // Query Google Calendar for events starting from 8 AM (to catch early meetings)
+    // Query Google Calendar for the *entire day*
     const response = await calendar.events.list({
       calendarId: calendarId,
       timeMin: queryStart.toISOString(),
       timeMax: queryEnd.toISOString(),
-      singleEvents: true,
+      singleEvents: true, // Important: Expands recurring events
       orderBy: 'startTime',
-      maxResults: 100,
-      timeZone: BUSINESS_TIMEZONE // Always query in Eastern Time
+      maxResults: 100, // Adjust if needed, but 100 should be enough for one day
+      timeZone: BUSINESS_TIMEZONE // Interpret times relative to ET
     });
 
-    // Filter out cancelled and transparent events
+    // Filter out cancelled and transparent events (same as before)
     const events = response.data.items.filter(event =>
       event.status !== 'cancelled' &&
       (!event.transparency || event.transparency !== 'transparent')
     );
 
-    console.log(`Found ${events.length} events for ${date} between 8AM-5PM Eastern`);
-    
-    // Debug: Print each event with its time
+    console.log(`Found ${events.length} events potentially overlapping with ${date}`);
+
+    // Debug: Print each event found
     events.forEach(event => {
-      if (!event.start.dateTime || !event.end.dateTime) return;
-      console.log(`Event: ${event.summary}, Time: ${event.start.dateTime} - ${event.end.dateTime}`);
+        if (event.start.date) { // Handle All-Day Events
+            console.log(`Event (All-Day): ${event.summary}, Date: ${event.start.date}`);
+        } else if (event.start.dateTime) { // Handle Timed Events
+            console.log(`Event (Timed): ${event.summary}, Time: ${event.start.dateTime} - ${event.end.dateTime}`);
+        } else {
+            console.log(`Event (Unknown type): ${event.summary}`);
+        }
     });
-    
-    // Calculate adjacent slots - use events from 8AM-5PM, but only create slots from 9AM-5PM
+
+
+    // Calculate adjacent slots - use events from the *full day* query,
+    // but only create slots within the 9AM-5PM ET window.
+    // The calculation function now needs to handle all-day events.
     const availableSlots = calculateAdjacentSlots(events, slotsStart, slotsEnd);
-    
-    console.log(`Returning ${availableSlots.length} available slots for ${date}`);
+
+    console.log(`Returning ${availableSlots.length} available adjacent slots for ${date}`);
     res.json(availableSlots);
   } catch (error) {
     console.error('Error fetching available slots:', error);
     res.status(500).send(error.message || 'Failed to fetch available slots');
   }
 });
+
+// Helper function to round a Date object DOWN to the nearest 30-minute mark (e.g., 10:05 -> 10:00, 10:35 -> 10:30)
+function roundDown30(date) {
+  const rounded = new Date(date);
+  rounded.setSeconds(0, 0);
+  const minutes = rounded.getMinutes();
+  if (minutes >= 30) {
+    rounded.setMinutes(30);
+  } else {
+    rounded.setMinutes(0);
+  }
+  return rounded;
+}
+
+// Helper function to round a Date object UP to the nearest 30-minute mark (e.g., 9:55 -> 10:00, 9:25 -> 9:30)
+function roundUp30(date) {
+  const rounded = new Date(date);
+  rounded.setSeconds(0, 0);
+  const minutes = rounded.getMinutes();
+  if (minutes > 30) {
+    rounded.setMinutes(0);
+    rounded.setHours(rounded.getHours() + 1);
+  } else if (minutes > 0 && minutes <= 30) {
+    rounded.setMinutes(30);
+  }
+  // If minutes are already 0, do nothing
+  return rounded;
+}
+
+
+
 
 // ----------------------------------------------
 //  BOOK APPOINTMENT (Strictly enforce 9-5 Eastern)
@@ -490,88 +528,119 @@ This meeting was booked via Dr. Jacobson's Meeting Scheduler App.
 });
 
 // ----------------------------------------------
-//  CALCULATE ADJACENT 30-MINUTE SLOTS
-//  Only from 9AM to 5PM Eastern
-// ----------------------------------------------
-function calculateAdjacentSlots(events, startOfDay, endOfDay) {
-  console.log("Events found:", events.map(e => ({
+// CALCULATE ADJACENT 30-MINUTE SLOTS (FIXED for Issue 1 & 2)
+// Only creates slots from 9AM to 5PM Eastern
+function calculateAdjacentSlots(events, startOfBusinessDay, endOfBusinessDay) {
+  console.log("Calculating adjacent slots within business hours:", startOfBusinessDay.toISOString(), "-", endOfBusinessDay.toISOString());
+  console.log("Events to consider:", events.map(e => ({
     summary: e.summary,
-    start: e.start.dateTime || e.start.date,
+    start: e.start.dateTime || e.start.date, // Include all-day info
     end: e.end.dateTime || e.end.date
   })));
 
-  // Build all 30-min slots from 9AM to 5PM Eastern Time
+  // Build all potential 30-min slots within business hours
   const slots = [];
-  let current = new Date(startOfDay);
+  let current = new Date(startOfBusinessDay);
 
-  console.log(`Building slots from ${current.toISOString()} to ${endOfDay.toISOString()}`);
-
-  while (current < endOfDay) {
+  while (current < endOfBusinessDay) {
     const slotStart = new Date(current);
     const slotEnd = new Date(current);
     slotEnd.setMinutes(slotEnd.getMinutes() + 30);
 
-    if (slotEnd <= endOfDay) {
+    if (slotEnd <= endOfBusinessDay) {
       slots.push({
         start: slotStart,
         end: slotEnd,
         isOverlapping: false,
-        isAdjacent: false
+        isAdjacent: false // Reset adjacency flag
       });
     }
     current.setMinutes(current.getMinutes() + 30);
   }
 
-  console.log(`Created ${slots.length} 30-minute slots within business hours`);
+  console.log(`Created ${slots.length} potential 30-minute slots within business hours.`);
 
-  // If no events, return empty array (no "adjacent" slots possible)
+  // If no events exist *at all* on this day, no slots can be adjacent.
   if (events.length === 0) {
-    console.log("No events found during business hours");
+    console.log("No events found overlapping this day, returning 0 adjacent slots.");
     return [];
   }
 
-  // Mark slots as overlapping or adjacent
+  // Mark slots as overlapping or adjacent based on ALL fetched events
   for (const event of events) {
-    if (!event.start.dateTime || !event.end.dateTime) continue;
-    
-    const eventStart = new Date(event.start.dateTime);
-    const eventEnd = new Date(event.end.dateTime);
+    let eventStart, eventEnd;
+    let isAllDay = false;
 
-    console.log(`Processing event: ${event.summary}, ${eventStart.toISOString()} - ${eventEnd.toISOString()}`);
+    if (event.start.date) {
+      // --- FIX for Issue 2: Handle All-Day Events ---
+      isAllDay = true;
+      // Treat all-day event as blocking the entire business day for overlap purposes
+      eventStart = new Date(startOfBusinessDay);
+      eventEnd = new Date(endOfBusinessDay);
+      console.log(`Processing All-Day Event: ${event.summary}. Treating as blocking ${eventStart.toISOString()} to ${eventEnd.toISOString()}`);
+    } else if (event.start.dateTime && event.end.dateTime) {
+      // Handle normally timed events
+      eventStart = new Date(event.start.dateTime);
+      eventEnd = new Date(event.end.dateTime);
+      console.log(`Processing Timed Event: ${event.summary}, ${eventStart.toISOString()} - ${eventEnd.toISOString()}`);
+    } else {
+      // Skip events without proper start/end times
+      console.log(`Skipping event with missing time info: ${event.summary}`);
+      continue;
+    }
+
+    // --- FIX for Issue 1: Rounding for Adjacency ---
+    // Calculate effective boundaries for adjacency checks
+    const effectiveStartRoundedDown = roundDown30(eventStart);
+    const effectiveEndRoundedUp = roundUp30(eventEnd);
 
     for (const slot of slots) {
-      // Overlap check: Is this slot already occupied by an event?
-      if (
-        (slot.start >= eventStart && slot.start < eventEnd) ||
-        (slot.end > eventStart && slot.end <= eventEnd) ||
-        (slot.start <= eventStart && slot.end >= eventEnd)
-      ) {
+      // Skip if already marked overlapping by a previous event
+      if (slot.isOverlapping) continue;
+
+      // --- Overlap Check (Handles all-day and timed events correctly now) ---
+      // Check if the slot interval [slot.start, slot.end) overlaps with the event interval [eventStart, eventEnd)
+      if (slot.start < eventEnd && slot.end > eventStart) {
         slot.isOverlapping = true;
+        console.log(`Slot ${slot.start.toISOString()} marked as overlapping by ${event.summary}`);
+        continue; // If it overlaps, it cannot be adjacent
       }
 
-      // Adjacent check: Is this slot immediately before or after an event?
-      // Using 60 seconds (60000ms) tolerance for "adjacency"
-      const slotStartsExactlyAfterEventEnds = Math.abs(slot.start.getTime() - eventEnd.getTime()) < 60000;
-      const slotEndsExactlyBeforeEventStarts = Math.abs(slot.end.getTime() - eventStart.getTime()) < 60000;
+      // --- Adjacent Check (Using Rounded Times - FIX for Issue 1) ---
+      // Only check adjacency for NON-all-day events
+      if (!isAllDay) {
+        // Is the slot's END time equal to the event's effective START time (rounded down)?
+        const endsBeforeEventStarts = slot.end.getTime() === effectiveStartRoundedDown.getTime();
 
-      if (slotStartsExactlyAfterEventEnds || slotEndsExactlyBeforeEventStarts) {
-        slot.isAdjacent = true;
-        console.log(`Found adjacent slot: ${slot.start.toISOString()} - ${slot.end.toISOString()}`);
+        // Is the slot's START time equal to the event's effective END time (rounded up)?
+        const startsAfterEventEnds = slot.start.getTime() === effectiveEndRoundedUp.getTime();
+
+        if (endsBeforeEventStarts || startsAfterEventEnds) {
+           // Check again it doesn't overlap (paranoid check, should be handled above)
+           if (!(slot.start < eventEnd && slot.end > eventStart)) {
+             slot.isAdjacent = true;
+             console.log(`Slot ${slot.start.toISOString()} marked as ADJACENT to ${event.summary} (Effective boundaries: ${effectiveStartRoundedDown.toISOString()} / ${effectiveEndRoundedUp.toISOString()})`);
+           }
+        }
       }
     }
   }
 
-  // Return only slots that are both non-overlapping AND adjacent to an event
-  const availableSlots = slots
+  // Filter for slots that are NOT overlapping AND ARE adjacent
+  const availableAdjacentSlots = slots
     .filter(slot => !slot.isOverlapping && slot.isAdjacent)
     .map(slot => ({
       start: slot.start.toISOString(),
       end: slot.end.toISOString()
     }));
 
-  console.log(`Found ${availableSlots.length} available adjacent slots`);
-  return availableSlots;
+  console.log(`Found ${availableAdjacentSlots.length} available adjacent slots after filtering.`);
+  return availableAdjacentSlots;
 }
+
+
+
+
 
 // ----------------------------------------------
 //  DATE RANGE AVAILABILITY
@@ -674,57 +743,70 @@ app.get('/api/date-range-availability', async (req, res) => {
 });
 
 // ----------------------------------------------
-//  CALCULATE ALL 30-MINUTE SLOTS (NOT JUST ADJACENT)
-//  Only from 9AM to 5PM Eastern
-// ----------------------------------------------
-function calculateAllSlots(events, startOfDay, endOfDay) {
-  // Build all 30-min slots from 9AM to 5PM Eastern Time
-  const slots = [];
-  let current = new Date(startOfDay);
-  
-  while (current < endOfDay) {
-    const slotStart = new Date(current);
-    const slotEnd = new Date(current);
-    slotEnd.setMinutes(slotEnd.getMinutes() + 30);
-    
-    if (slotEnd <= endOfDay) {
-      slots.push({
-        start: slotStart,
-        end: slotEnd,
-        isOverlapping: false
-      });
+// CALCULATE ALL 30-MINUTE SLOTS (FIXED for Issue 2)
+// Only from 9AM to 5PM Eastern
+function calculateAllSlots(events, startOfBusinessDay, endOfBusinessDay) {
+    console.log("Calculating ALL available slots within business hours:", startOfBusinessDay.toISOString(), "-", endOfBusinessDay.toISOString());
+
+    const slots = [];
+    let current = new Date(startOfBusinessDay);
+
+    while (current < endOfBusinessDay) {
+        const slotStart = new Date(current);
+        const slotEnd = new Date(current);
+        slotEnd.setMinutes(slotEnd.getMinutes() + 30);
+
+        if (slotEnd <= endOfBusinessDay) {
+            slots.push({
+                start: slotStart,
+                end: slotEnd,
+                isOverlapping: false
+            });
+        }
+        current.setMinutes(current.getMinutes() + 30);
     }
-    current.setMinutes(current.getMinutes() + 30);
-  }
-  
-  // Mark slots as overlapping
-  for (const event of events) {
-    if (!event.start.dateTime || !event.end.dateTime) continue;
-    
-    const eventStart = new Date(event.start.dateTime);
-    const eventEnd = new Date(event.end.dateTime);
-    
-    for (const slot of slots) {
-      // Overlap check
-      if (
-        (slot.start >= eventStart && slot.start < eventEnd) ||
-        (slot.end > eventStart && slot.end <= eventEnd) ||
-        (slot.start <= eventStart && slot.end >= eventEnd)
-      ) {
-        slot.isOverlapping = true;
-      }
+
+    console.log(`Created ${slots.length} potential 30-minute slots.`);
+
+    // Mark slots as overlapping
+    for (const event of events) {
+        let eventStart, eventEnd;
+
+        if (event.start.date) {
+            // --- FIX for Issue 2: Handle All-Day Events ---
+            eventStart = new Date(startOfBusinessDay);
+            eventEnd = new Date(endOfBusinessDay);
+             console.log(`Processing All-Day Event for overlap: ${event.summary}`);
+        } else if (event.start.dateTime && event.end.dateTime) {
+            eventStart = new Date(event.start.dateTime);
+            eventEnd = new Date(event.end.dateTime);
+             console.log(`Processing Timed Event for overlap: ${event.summary}`);
+        } else {
+            continue; // Skip incomplete events
+        }
+
+        for (const slot of slots) {
+           // Skip if already marked
+           if (slot.isOverlapping) continue;
+
+            // Overlap check
+            if (slot.start < eventEnd && slot.end > eventStart) {
+                slot.isOverlapping = true;
+                 console.log(`Slot ${slot.start.toISOString()} marked as overlapping by ${event.summary}`);
+            }
+        }
     }
-  }
-  
-  // Return only non-overlapping slots
-  const availableSlots = slots
-    .filter(slot => !slot.isOverlapping)
-    .map(slot => ({
-      start: slot.start.toISOString(),
-      end: slot.end.toISOString()
-    }));
-    
-  return availableSlots;
+
+    // Return only non-overlapping slots
+    const availableSlots = slots
+        .filter(slot => !slot.isOverlapping)
+        .map(slot => ({
+            start: slot.start.toISOString(),
+            end: slot.end.toISOString()
+        }));
+
+    console.log(`Found ${availableSlots.length} non-overlapping slots.`);
+    return availableSlots;
 }
 
 
