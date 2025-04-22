@@ -731,15 +731,66 @@ app.get('/api/date-range-availability', async (req, res) => {
         timeZone: BUSINESS_TIMEZONE
       });
       
-      // Filter events
-      const events = response.data.items.filter(event =>
-        event.status !== 'cancelled' &&
-        (!event.transparency || event.transparency !== 'transparent')
-      );
-      
-      // Calculate slots
-      const adjacentSlots = calculateAdjacentSlots(events, slotsStart, slotsEnd);
-      const allSlots = calculateAllSlots(events, slotsStart, slotsEnd);
+	//------------------------------------------------------------
+	// 1) Filter raw events (remove cancelled / transparent)
+	//------------------------------------------------------------
+	const rawEvents = response.data.items.filter(ev =>
+	  ev.status !== 'cancelled' &&
+	  (!ev.transparency || ev.transparency !== 'transparent')
+	);
+
+	//------------------------------------------------------------
+	// 2) Convert them into “processedEvents” so     
+	//    every entry ALWAYS has start.dateTime/end.dateTime. 
+	//    – timed events pass straight through               
+	//    – all‑day events that cover this calendar day get  
+	//      a synthetic 9‑to‑5 ET block                      
+	//------------------------------------------------------------
+	const processedEvents = [];
+
+	rawEvents.forEach(ev => {
+	  /* -------- All‑day -------- */
+	  if (ev.start?.date) {
+		// All‑day events come with inclusive start date and
+		//   exclusive end date (per Google Calendar spec).
+		const eventStartUTC = new Date(ev.start.date + 'T00:00:00Z');
+		const eventEndExclusiveUTC = new Date(ev.end.date + 'T00:00:00Z');
+
+		// “day” is the Date object we’re iterating over in this loop
+		if (day >= eventStartUTC && day < eventEndExclusiveUTC) {
+		  processedEvents.push({
+			summary: `${ev.summary} (All‑Day Block)`,
+			start: { dateTime: slotsStart.toISOString() }, // 9 AM ET
+			end:   { dateTime: slotsEnd.toISOString() },   // 5 PM ET
+			isSyntheticAllDay: true
+		  });
+		}
+
+	  /* -------- Timed -------- */
+	  } else if (ev.start?.dateTime) {
+		const evStart = new Date(ev.start.dateTime);
+		const evEnd   = new Date(ev.end.dateTime);
+		// Keep only those that touch the 9‑5 window
+		if (evStart < slotsEnd && evEnd > slotsStart) {
+		  processedEvents.push(ev);
+		}
+	  }
+	});
+
+	//------------------------------------------------------------
+	// 3) Let the slot calculators work off the *processed* list
+	//------------------------------------------------------------
+	const adjacentSlots = calculateAdjacentSlots(
+	  processedEvents,
+	  slotsStart,
+	  slotsEnd
+	);
+	const allSlots = calculateAllSlots(
+	  processedEvents,
+	  slotsStart,
+	  slotsEnd
+	);
+
       
       availability[dateStr] = {
         adjacent: adjacentSlots,
