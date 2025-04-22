@@ -310,98 +310,95 @@ app.get('/api/available-slots', async (req, res) => {
 
     // Check if the selected date is a weekend (0 = Sunday, 6 = Saturday)
     const dayOfWeek = selectedDateUTC.getUTCDay();
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
-      console.log(`Selected date ${date} is a weekend (day ${dayOfWeek}). No bookings allowed.`);
-      return res.json([]); // Return empty array for weekends
+    if (dayOfWeek === 0 || dayOfWeek === 6) { // [cite: 1649]
+      console.log(`Selected date ${date} is a weekend (day ${dayOfWeek}). No bookings allowed.`); // [cite: 1650]
+      return res.json([]); // Return empty array for weekends // [cite: 1650]
     }
 
     // Check if DST is in effect for the given date
-    const isDST = isEasternTimeDST(date);
-    const utcOffset = isDST ? 4 : 5; // EDT=UTC-4, EST=UTC-5
+    const isDST = isEasternTimeDST(date); // [cite: 1651]
+    const utcOffset = isDST ? 4 : 5; // EDT=UTC-4, EST=UTC-5 // [cite: 1651]
 
     // Query window: Full day in ET, represented in UTC
-    const queryStart = new Date(Date.UTC(year, month, day, utcOffset, 0, 0)); // 00:00 ET
-    const queryEnd = new Date(Date.UTC(year, month, day + 1, utcOffset, 0, 0)); // 00:00 ET next day
+    const queryStart = new Date(Date.UTC(year, month, day, utcOffset, 0, 0)); // [cite: 1652]
+    const queryEnd = new Date(Date.UTC(year, month, day + 1, utcOffset, 0, 0)); // [cite: 1653]
 
     // Business hours for creating slots (9 AM - 5 PM ET)
-    const slotsStart = new Date(Date.UTC(year, month, day, 9 + utcOffset, 0, 0)); // 9AM ET
-    const slotsEnd = new Date(Date.UTC(year, month, day, 17 + utcOffset, 0, 0));   // 5PM ET
+    const slotsStart = new Date(Date.UTC(year, month, day, 9 + utcOffset, 0, 0)); // [cite: 1654]
+    const slotsEnd = new Date(Date.UTC(year, month, day, 17 + utcOffset, 0, 0)); // [cite: 1655]
 
-    console.log(`DST in effect: ${isDST}, Using UTC offset: ${utcOffset}`);
-    console.log(`Querying events for full day: ${queryStart.toISOString()} to ${queryEnd.toISOString()}`);
-    console.log(`Will create slots within business hours: ${slotsStart.toISOString()} to ${slotsEnd.toISOString()}`);
-
-    const calendarId = await findWorkCalendar();
+    console.log(`DST in effect: ${isDST}, Using UTC offset: ${utcOffset}`); // [cite: 1656]
+    console.log(`Querying events for full day: ${queryStart.toISOString()} to ${queryEnd.toISOString()}`); // [cite: 1656]
+    console.log(`Will create slots within business hours: ${slotsStart.toISOString()} to ${slotsEnd.toISOString()}`); // [cite: 1657]
+    const calendarId = await findWorkCalendar(); // [cite: 1657]
 
     // Query Google Calendar for the *entire day*
-    const response = await calendar.events.list({
+    const response = await calendar.events.list({ // [cite: 1658]
       calendarId: calendarId,
       timeMin: queryStart.toISOString(),
       timeMax: queryEnd.toISOString(),
       singleEvents: true,
       orderBy: 'startTime',
-      maxResults: 100,
-      timeZone: BUSINESS_TIMEZONE
+      maxResults: 100, // Limit results just in case
+      timeZone: BUSINESS_TIMEZONE // Query in the business timezone
     });
-
     // Filter out cancelled and transparent events
-    const rawEvents = response.data.items.filter(event =>
+    const rawEvents = response.data.items.filter(event => // [cite: 1658]
       event.status !== 'cancelled' &&
       (!event.transparency || event.transparency !== 'transparent')
     );
+    console.log(`Found ${rawEvents.length} raw events potentially overlapping with ${date}`); // [cite: 1659]
 
-    console.log(`Found ${rawEvents.length} raw events potentially overlapping with ${date}`);
+    // *** START: MODIFIED All-Day Event Processing Logic ***
+    const processedEvents = []; // [cite: 1660]
+    rawEvents.forEach(event => { // [cite: 1660]
+      if (event.start.date) { // Handle All-Day Events // [cite: 1660]
+         console.log(`Processing Raw Event (All-Day Check): ${event.summary}, Start: ${event.start.date}, End: ${event.end.date}`); // [cite: 1660]
+         // Parse all-day event dates as UTC midnight
+         const eventStartDate = new Date(event.start.date + 'T00:00:00Z'); // [cite: 1661]
+         // End date is exclusive, so no need to adjust it for comparison
+         const eventEndDateExclusive = new Date(event.end.date + 'T00:00:00Z'); // [cite: 1661]
 
-    // *** NEW: Process Events to Handle All-Day Correctly for the specific day ***
-    const processedEvents = [];
-    rawEvents.forEach(event => {
-      if (event.start.date) { // Handle All-Day Events (potentially multi-day)
-        console.log(`Processing Raw Event (All-Day Check): ${event.summary}, Start: ${event.start.date}, End: ${event.end.date}`);
-        // Parse all-day event dates as UTC midnight
-        const eventStartDate = new Date(event.start.date + 'T00:00:00Z');
-        // End date is exclusive, so no need to subtract a day for comparison
-        const eventEndDateExclusive = new Date(event.end.date + 'T00:00:00Z');
+         // Check if the *selected date* falls within the all-day event's range
+         if (selectedDateUTC >= eventStartDate && selectedDateUTC < eventEndDateExclusive) { // [cite: 1661]
+            console.log(`---> All-Day event "${event.summary}" BLOCKS the selected date ${date}. Adding full business day block.`); // [cite: 1662]
+            // Add a synthetic event blocking the *entire business day* (9am-5pm ET)
+            processedEvents.push({ // [cite: 1662]
+                summary: `${event.summary} (All-Day Block for ${date})`,
+                start: { dateTime: slotsStart.toISOString() }, // Blocks 9am ET // [cite: 1662]
+                end: { dateTime: slotsEnd.toISOString() },     // Blocks until 5pm ET // [cite: 1662]
+                isSyntheticAllDay: true // Flag for debugging/potential future use // [cite: 1662]
+            });
+         } else { // [cite: 1663]
+           console.log(`---> All-Day event "${event.summary}" does NOT block the selected date ${date}.`); // [cite: 1664]
+         }
 
-        // Check if the selected date falls within the all-day event's range
-        if (selectedDateUTC >= eventStartDate && selectedDateUTC < eventEndDateExclusive) {
-          console.log(`---> All-Day event "${event.summary}" BLOCKS the selected date ${date}. Adding full business day block.`);
-          // Add a synthetic event blocking the *entire business day*
-          processedEvents.push({
-            summary: `${event.summary} (All-Day Block for ${date})`,
-            start: { dateTime: slotsStart.toISOString() }, // Blocks 9am ET
-            end: { dateTime: slotsEnd.toISOString() },     // Blocks until 5pm ET
-            isSyntheticAllDay: true // Flag for debugging/potential future use
-          });
-        } else {
-           console.log(`---> All-Day event "${event.summary}" does NOT block the selected date ${date}.`);
-        }
-
-      } else if (event.start.dateTime) { // Handle Timed Events
-         console.log(`Processing Raw Event (Timed): ${event.summary}, Time: ${event.start.dateTime} - ${event.end.dateTime}`);
-        // Add timed events directly if they overlap the business hours at all
-         const eventStart = new Date(event.start.dateTime);
-         const eventEnd = new Date(event.end.dateTime);
-         if (eventStart < slotsEnd && eventEnd > slotsStart) {
-             processedEvents.push(event);
-         } else {
-              console.log(`---> Timed event "${event.summary}" is outside business hours ${slotsStart.toISOString()} - ${slotsEnd.toISOString()}. Skipping.`);
+      } else if (event.start.dateTime) { // Handle Timed Events // [cite: 1664]
+         console.log(`Processing Raw Event (Timed): ${event.summary}, Time: ${event.start.dateTime} - ${event.end.dateTime}`); // [cite: 1665]
+         // Add timed events directly if they overlap the business hours at all
+         const eventStart = new Date(event.start.dateTime); // [cite: 1666]
+         const eventEnd = new Date(event.end.dateTime); // [cite: 1666]
+         // Check for any overlap with business hours (9am-5pm ET)
+         if (eventStart < slotsEnd && eventEnd > slotsStart) { // [cite: 1667]
+             processedEvents.push(event); // [cite: 1667]
+         } else { // [cite: 1667]
+              console.log(`---> Timed event "${event.summary}" is outside business hours ${slotsStart.toISOString()} - ${slotsEnd.toISOString()}. Skipping.`); // [cite: 1668]
          }
       } else {
-        console.log(`Event (Unknown type): ${event.summary}. Skipping.`);
+        console.log(`Event (Unknown type): ${event.summary}. Skipping.`); // [cite: 1669]
       }
     });
-    // *** END NEW PROCESSING ***
+    // *** END: MODIFIED All-Day Event Processing Logic ***
 
-    console.log(`Total processed events (timed + synthetic all-day blocks) for calculations: ${processedEvents.length}`);
+    console.log(`Total processed events (timed + synthetic all-day blocks) for calculations: ${processedEvents.length}`); // [cite: 1670]
 
     // Calculate adjacent slots using the PROCESSED events list
-    const availableSlots = calculateAdjacentSlots(processedEvents, slotsStart, slotsEnd);
-
-    console.log(`Returning ${availableSlots.length} available adjacent slots for ${date}`);
+    const availableSlots = calculateAdjacentSlots(processedEvents, slotsStart, slotsEnd); // [cite: 1671]
+    console.log(`Returning ${availableSlots.length} available adjacent slots for ${date}`); // [cite: 1672]
     res.json(availableSlots);
   } catch (error) {
-    console.error('Error fetching available slots:', error);
-    res.status(500).send(error.message || 'Failed to fetch available slots');
+    console.error('Error fetching available slots:', error); // [cite: 1672]
+    res.status(500).send(error.message || 'Failed to fetch available slots'); // [cite: 1673]
   }
 });
 
