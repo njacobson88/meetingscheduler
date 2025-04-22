@@ -347,6 +347,11 @@ app.get('/api/available-slots', async (req, res) => {
       event.status !== 'cancelled' &&
       (!event.transparency || event.transparency !== 'transparent')
     );
+	
+	// --->>> ADD THIS LINE EXACTLY AS SHOWN <<<---
+	console.log(`Raw events fetched:`, JSON.stringify(rawEvents, null, 2));
+	// --->>> END OF LINE TO ADD <<<---
+	
     console.log(`Found ${rawEvents.length} raw events potentially overlapping with ${date}`); // [cite: 1659]
 
     // *** START: MODIFIED All-Day Event Processing Logic ***
