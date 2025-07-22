@@ -441,6 +441,9 @@ function roundUp30(date) {
 // ----------------------------------------------
 //  BOOK APPOINTMENT (Strictly enforce 9-5 Eastern)
 // ----------------------------------------------
+// ----------------------------------------------
+//  BOOK APPOINTMENT (Strictly enforce 9-5 Eastern)
+// ----------------------------------------------
 app.post('/api/book', async (req, res) => {
   const { startTime, endTime, name, email, timezone } = req.body;
   if (!startTime || !endTime || !name || !email) {
@@ -459,27 +462,38 @@ app.post('/api/book', async (req, res) => {
     const startDate = new Date(startTime);
     const endDate = new Date(endTime);
     
-    // Check if the booking is on a weekend
-    const dayOfWeek = startDate.getDay();
+    // Check if the booking is on a weekend using UTC day
+    const dayOfWeek = startDate.getUTCDay();
     if (dayOfWeek === 0 || dayOfWeek === 6) {
       return res.status(400).send('Appointments cannot be booked on weekends');
     }
 
-    // Validate 9-5 Eastern Time constraint (using proper UTC hours for Eastern Time)
-    // 9 AM ET = 14:00 UTC, 5 PM ET = 22:00 UTC
+    // --- START: CORRECTED VALIDATION LOGIC ---
+    // Dynamically determine the correct UTC offset for the booking date
+    const dateStr = startDate.toISOString().split('T')[0];
+    const isDST = isEasternTimeDST(dateStr);
+    const utcOffset = isDST ? 4 : 5; // EDT is UTC-4, EST is UTC-5
+
+    // Calculate business hours in UTC for the specific day
+    const businessStartHourUTC = 9 + utcOffset;  // 13:00 in EDT, 14:00 in EST
+    const businessEndHourUTC = 17 + utcOffset;    // 21:00 in EDT, 22:00 in EST
+    
     const startHourUTC = startDate.getUTCHours();
     const endHourUTC = endDate.getUTCHours();
-    const startMinUTC = startDate.getUTCMinutes();
     const endMinUTC = endDate.getUTCMinutes();
-
-    console.log(`Time in UTC: ${startHourUTC}:${startMinUTC} - ${endHourUTC}:${endMinUTC}`);
     
-    if (
-      startHourUTC < 14 || (startHourUTC === 22 && startMinUTC > 0) || startHourUTC > 22 ||
-      endHourUTC < 14 || endHourUTC > 22
-    ) {
+    console.log(`Time in UTC: ${startDate.getUTCHours()}:${startDate.getUTCMinutes()} - ${endHourUTC}:${endMinUTC}`);
+    console.log(`Valid business hours in UTC for this date: ${businessStartHourUTC}:00 to ${businessEndHourUTC}:00`);
+
+    const isBeforeBusinessHours = startHourUTC < businessStartHourUTC;
+    // A slot is after business hours if it starts at or after the end hour,
+    // or if it ends after the business day closes (e.g., a 4:30-5:01 slot)
+    const isAfterBusinessHours = startHourUTC >= businessEndHourUTC || (endHourUTC === businessEndHourUTC && endMinUTC > 0) || endHourUTC > businessEndHourUTC;
+
+    if (isBeforeBusinessHours || isAfterBusinessHours) {
       return res.status(400).send('Appointments must be between 9AM and 5PM Eastern Time');
     }
+    // --- END: CORRECTED VALIDATION LOGIC ---
 
     const zoomLink = "dartmouth.zoom.us/my/jacobsonlab";
     
