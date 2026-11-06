@@ -12,7 +12,7 @@
     "client": "cd client && npm start"
   },
   "engines": {
-    "node": ">=16.x"
+    "node": "22.x"
   },
   "dependencies": {
     "cors": "^2.8.5",
