@@ -89,8 +89,9 @@ function App() {
   const fetchAvailableSlots = async () => {
     setIsLoading(true);
     try {
-      // Format date as YYYY-MM-DD to ensure consistency across timezones
-      const formattedDate = selectedDate.toISOString().split('T')[0];
+      // Use the calendar date the visitor picked. toISOString() converts to UTC,
+      // which rolls over to the next day for evening loads in the Americas.
+      const formattedDate = moment(selectedDate).format('YYYY-MM-DD');
       console.log(`Fetching slots for date: ${formattedDate}, timezone: ${userTimezone}`);
       
       const response = await axios.get(`${baseUrl}/api/available-slots`, {
@@ -109,7 +110,8 @@ function App() {
   };
   
   const handleDateChange = (date) => {
-    setSelectedDate(date);
+    // Drop the time of day the picker carries over from page load
+    setSelectedDate(moment(date).startOf('day').toDate());
     setSelectedSlot(null);
   };
   
@@ -156,6 +158,14 @@ function App() {
   const formatTime = (isoString) => {
     const date = moment(isoString).tz(userTimezone);
     return date.format('h:mm A'); // Format: 3:30 PM
+  };
+
+  const formatSlotDate = (isoString) => {
+    return moment(isoString).tz(userTimezone).format('ddd, MMM D');
+  };
+
+  const formatSlotRange = (slot) => {
+    return `${formatSlotDate(slot.start)}, ${formatTime(slot.start)} - ${formatTime(slot.end)}`;
   };
   
   if (adminNotAuthenticated) {
@@ -228,6 +238,9 @@ function App() {
           
           <div className="slots-container">
             <h2>Available Time Slots</h2>
+            <p className="slots-date">
+              Showing times for {moment(selectedDate).format('dddd, MMMM D, YYYY')} (Eastern business hours), displayed in {userTimezone.replace(/_/g, ' ')}
+            </p>
             {isLoading ? (
               <p>Loading available slots...</p>
             ) : availableSlots.length === 0 ? (
@@ -240,7 +253,7 @@ function App() {
                     className={`slot-button ${selectedSlot === slot ? 'selected' : ''}`}
                     onClick={() => handleSlotSelect(slot)}
                   >
-                    {formatTime(slot.start)} - {formatTime(slot.end)}
+                    {formatSlotRange(slot)}
                   </button>
                 ))}
               </div>
@@ -274,7 +287,7 @@ function App() {
                 <div className="form-group">
                   <label>Selected Time</label>
                   <p>
-                    {formatTime(selectedSlot.start)} - {formatTime(selectedSlot.end)}
+                    {formatSlotRange(selectedSlot)} ({userTimezone.replace(/_/g, ' ')})
                   </p>
                 </div>
                 <div className="form-info">
