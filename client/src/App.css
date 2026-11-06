@@ -211,3 +211,8 @@ h2 {
 .admin-link:hover {
   background-color: #e0e0e0;
 }
+.slots-date {
+  color: #555;
+  font-size: 0.95rem;
+  margin: 0 0 0.75rem;
+}
